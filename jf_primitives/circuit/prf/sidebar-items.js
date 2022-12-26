@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["PrfGadget","Circuit implementation of a PRF."]]};

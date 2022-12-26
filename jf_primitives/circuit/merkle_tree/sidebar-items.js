@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["MerkleTreeGadget","Gadget for a Merkle tree"]]};
