@@ -261,7 +261,7 @@
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>typenum::Unsigned;
 
-<span class="macro">impl_merkle_tree_scheme!</span>(MerkleTree);
+<span class="macro">impl_merkle_tree_scheme!</span>(MerkleTree, build_tree_internal);
 <span class="macro">impl_forgetable_merkle_tree_scheme!</span>(MerkleTree);
 
 <span class="kw">impl</span>&lt;E, H, I, Arity, T&gt; AppendableMerkleTreeScheme <span class="kw">for </span>MerkleTree&lt;E, H, I, Arity, T&gt;
@@ -477,4 +477,4 @@
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="jf_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.0 (69f9c33d7 2022-12-12)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="jf_primitives" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.1 (90743e729 2023-01-10)" ></div></body></html>
