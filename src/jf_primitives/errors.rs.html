@@ -115,8 +115,8 @@
             BLST_ERROR::BLST_SUCCESS =&gt; {
                 <span class="self">Self</span>::InternalError(<span class="string">&quot;Expecting an error, but got a sucess.&quot;</span>.to_string())
             },
-            BLST_ERROR::BLST_VERIFY_FAIL =&gt; <span class="self">Self</span>::VerificationError(<span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, e)),
-            <span class="kw">_ </span>=&gt; <span class="self">Self</span>::ParameterError(<span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, e)),
+            BLST_ERROR::BLST_VERIFY_FAIL =&gt; <span class="self">Self</span>::VerificationError(<span class="macro">format!</span>(<span class="string">&quot;{e:?}&quot;</span>)),
+            <span class="kw">_ </span>=&gt; <span class="self">Self</span>::ParameterError(<span class="macro">format!</span>(<span class="string">&quot;{e:?}&quot;</span>)),
         }
     }
 }

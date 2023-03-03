@@ -211,7 +211,7 @@
     <span class="comment">// this happen during invocation of Plonk proof system API inside Verifier
     // gadget
     </span><span class="kw">fn </span>from(e: PlonkError) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::ParameterError(<span class="macro">format!</span>(<span class="string">&quot;Plonk proof system err: {:?}&quot;</span>, e))
+        <span class="self">Self</span>::ParameterError(<span class="macro">format!</span>(<span class="string">&quot;Plonk proof system err: {e:?}&quot;</span>))
     }
 }
 </code></pre></div>

@@ -779,7 +779,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), PrimitivesError&gt; {
         <span class="kw">match </span>sig.verify(<span class="bool-val">false</span>, msg.as_ref(), <span class="self">Self</span>::CS_ID.as_bytes(), <span class="kw-2">&amp;</span>[], vk, <span class="bool-val">true</span>) {
             BLST_ERROR::BLST_SUCCESS =&gt; <span class="prelude-val">Ok</span>(()),
-            e =&gt; <span class="prelude-val">Err</span>(PrimitivesError::VerificationError(<span class="macro">format!</span>(<span class="string">&quot;{:?}&quot;</span>, e))),
+            e =&gt; <span class="prelude-val">Err</span>(PrimitivesError::VerificationError(<span class="macro">format!</span>(<span class="string">&quot;{e:?}&quot;</span>))),
         }
     }
 }

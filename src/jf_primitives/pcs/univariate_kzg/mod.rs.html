@@ -637,7 +637,7 @@
 
         <span class="kw">let </span>res = E::product_of_pairings(pairing_inputs.iter()).is_one();
 
-        <span class="macro">end_timer!</span>(check_time, || <span class="macro">format!</span>(<span class="string">&quot;Result: {}&quot;</span>, res));
+        <span class="macro">end_timer!</span>(check_time, || <span class="macro">format!</span>(<span class="string">&quot;Result: {res}&quot;</span>));
         <span class="prelude-val">Ok</span>(res)
     }
 
@@ -697,7 +697,7 @@
         ])
         .is_one();
         <span class="macro">end_timer!</span>(pairing_time);
-        <span class="macro">end_timer!</span>(check_time, || <span class="macro">format!</span>(<span class="string">&quot;Result: {}&quot;</span>, result));
+        <span class="macro">end_timer!</span>(check_time, || <span class="macro">format!</span>(<span class="string">&quot;Result: {result}&quot;</span>));
         <span class="prelude-val">Ok</span>(result)
     }
 }

@@ -281,7 +281,6 @@
 <a href="#281" id="281">281</a>
 <a href="#282" id="282">282</a>
 <a href="#283" id="283">283</a>
-<a href="#284" id="284">284</a>
 </pre><pre class="rust"><code><span class="comment">// Copyright (c) 2022 Espresso Systems (espressosys.com)
 // This file is part of the Jellyfish library.
 
@@ -387,9 +386,8 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(<span class="self">Self</span>::ProverParam, <span class="self">Self</span>::VerifierParam), PCSError&gt; {
         <span class="kw">if </span>supported_num_vars &gt; <span class="self">self</span>.prover_param.num_vars {
             <span class="kw">return </span><span class="prelude-val">Err</span>(PCSError::InvalidParameters(<span class="macro">format!</span>(
-                <span class="string">&quot;SRS does not support target number of vars {}&quot;</span>,
-                supported_num_vars
-            )));
+                <span class="string">&quot;SRS does not support target number of vars {supported_num_vars}&quot;
+            </span>)));
         }
 
         <span class="kw">let </span>to_reduce = <span class="self">self</span>.prover_param.num_vars - supported_num_vars;
