@@ -193,7 +193,7 @@ where
         }
         let n = circuits[0].eval_domain_size()?;
         let num_wire_types = circuits[0].num_wire_types();
-        for (circuit, pk) in circuits.iter().zip(prove_keys.iter()) {
+        for (circuit, pk) in circuits.iter().zip(prove_keys) {
             if circuit.eval_domain_size()? != n {
                 return Err(ParameterError(format!(
                     "circuit domain size {} != expected domain size {}",
@@ -234,7 +234,7 @@ where
         if let Some(msg) = extra_transcript_init_msg {
             transcript.append_message(EXTRA_TRANSCRIPT_MSG_LABEL, &msg)?;
         }
-        for (pk, circuit) in prove_keys.iter().zip(circuits.iter()) {
+        for (pk, circuit) in prove_keys.iter().zip(circuits) {
             transcript.append_vk_and_pub_input(&pk.vk, &circuit.public_input()?)?;
         }
         // Initialize verifier challenges and online polynomial oracles.

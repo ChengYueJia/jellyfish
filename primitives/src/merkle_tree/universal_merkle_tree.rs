@@ -306,11 +306,10 @@ mod mt_tests {
         let root = mt.commitment().digest();
 
         // Look up and forget an element that is in the tree.
-        let (lookup_elem, lookup_mem_proof) = mt
+        let (&lookup_elem, lookup_mem_proof) = mt
             .universal_lookup(BigUint::from(0u64))
             .expect_ok()
             .unwrap();
-        let lookup_elem = lookup_elem.clone();
         let (elem, mem_proof) = mt.universal_forget(0u64.into()).expect_ok().unwrap();
         assert_eq!(lookup_elem, elem);
         assert_eq!(lookup_mem_proof, mem_proof);

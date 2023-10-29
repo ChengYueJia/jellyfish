@@ -705,7 +705,7 @@ mod tests {
     #[test]
     fn sad_path_verify_share_corrupt_commit() {
         let (advz, bytes_random) = avdz_init();
-        let disperse = advz.disperse(&bytes_random).unwrap();
+        let disperse = advz.disperse(bytes_random).unwrap();
         let (shares, common) = (disperse.shares, disperse.common);
 
         // missing commit
@@ -750,7 +750,7 @@ mod tests {
     #[test]
     fn sad_path_verify_share_corrupt_share_and_commit() {
         let (advz, bytes_random) = avdz_init();
-        let disperse = advz.disperse(&bytes_random).unwrap();
+        let disperse = advz.disperse(bytes_random).unwrap();
         let (mut shares, mut common) = (disperse.shares, disperse.common);
 
         common.poly_commits.pop();
@@ -829,7 +829,7 @@ mod tests {
 
         // more items as a function of the above
         let payload_elems_len = num_polys * payload_chunk_size;
-        let payload_bytes_len = payload_elems_len * modulus_byte_len::<E>();
+        let payload_bytes_len = payload_elems_len * modulus_byte_len();
         let mut rng = jf_utils::test_rng();
         let payload_bytes = init_random_bytes(payload_bytes_len, &mut rng);
         let srs = init_srs(payload_elems_len, &mut rng);
@@ -913,10 +913,7 @@ mod tests {
             .unwrap()
     }
 
-    fn modulus_byte_len<E>() -> usize
-    where
-        E: Pairing,
-    {
+    fn modulus_byte_len() -> usize {
         usize::try_from((<<UnivariateKzgPCS<Bls12_381> as PolynomialCommitmentScheme>::Evaluation as Field>::BasePrimeField
         ::MODULUS_BIT_SIZE - 7)/8 + 1).unwrap()
     }

@@ -171,8 +171,7 @@ mod mt_tests {
     fn test_mt_forget_remember_helper<F: RescueParameter>() {
         let mut mt = RescueMerkleTree::<F>::from_elems(2, &[F::from(3u64), F::from(1u64)]).unwrap();
         let root = mt.commitment().digest();
-        let (lookup_elem, lookup_proof) = mt.lookup(0).expect_ok().unwrap();
-        let lookup_elem = lookup_elem.clone();
+        let (&lookup_elem, lookup_proof) = mt.lookup(0).expect_ok().unwrap();
         let (elem, proof) = mt.forget(0).expect_ok().unwrap();
         assert_eq!(lookup_elem, elem);
         assert_eq!(lookup_proof, proof);
