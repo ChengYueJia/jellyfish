@@ -360,6 +360,7 @@ where
     /// The map from arithmetic/lookup gate wires to variables.
     // wire_variables: [Vec<Variable>; GATE_WIDTH + 2],
     /// The map from arithmetic/relaxed/lookup gate wires to variables.
+    /// wire identities are [w_0, w_1, w_2, w_3, w_o, w_e, w_r]
     wire_variables: [Vec<Variable>; GATE_WIDTH + 3],
     /// The IO gates for the list of public input variables.
     pub_input_gate_ids: Vec<GateId>,
