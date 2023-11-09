@@ -300,7 +300,7 @@ pub trait Arithmetization<F: FftField>: Circuit<F> {
     }
 }
 
-/// The wire identifiers are [lc_0, lc_1, lc_2, lc_3, lc_o, lc_e, lc_r]
+/// The wire identifiers are [w_0, w_1, w_2, w_3, w_o, w_e, w_r]
 /// The wire type identifier for range gates.
 // const RANGE_WIRE_ID: usize = 5;
 const RANGE_WIRE_ID: usize = 6;
