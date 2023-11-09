@@ -106,6 +106,9 @@ where
     fn q_o(&self) -> F {
         F::one()
     }
+    fn q_e(&self) -> F {
+        F::one()
+    }
 }
 
 /// A mul constant gate.
@@ -145,6 +148,9 @@ where
     }
     fn q_o(&self) -> F {
         MultiplicationGate.q_o()
+    }
+    fn q_e(&self) -> F {
+        MultiplicationGate.q_e()
     }
 }
 
@@ -208,6 +214,7 @@ pub struct QuadPolyGate<F: Field> {
     pub(crate) q_lc: [F; GATE_WIDTH],
     pub(crate) q_mul: [F; N_MUL_SELECTORS],
     pub(crate) q_o: F,
+    pub(crate) q_e: F,
     pub(crate) q_c: F,
 }
 impl<F> Gate<F> for QuadPolyGate<F>
@@ -225,6 +232,9 @@ where
     }
     fn q_o(&self) -> F {
         self.q_o
+    }
+    fn q_e(&self) -> F {
+        self.q_e
     }
     fn q_c(&self) -> F {
         self.q_c
@@ -269,9 +279,13 @@ where
     fn q_o(&self) -> F {
         F::one()
     }
+    fn q_e(&self) -> F {
+        F::one()
+    }
 }
 
 /// A gate for conditional selection
+/// a + (- c * a) + (b * c) = [a/b]
 #[derive(Clone)]
 pub struct CondSelectGate;
 
@@ -289,6 +303,9 @@ where
         [-F::one(), F::one()]
     }
     fn q_o(&self) -> F {
+        F::one()
+    }
+    fn q_e(&self) -> F {
         F::one()
     }
 }

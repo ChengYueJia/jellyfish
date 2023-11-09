@@ -192,6 +192,9 @@ where
             .into());
         }
         let n = circuits[0].eval_domain_size()?;
+
+        // [lc_0, lc_1, lc_2, lc_3, lc_e, lc_o] for TurboPlonk
+        // [lc_0, lc_1, lc_2, lc_3, lc_e, lc_t, lc_o] for UltraPlonk
         let num_wire_types = circuits[0].num_wire_types();
         for (circuit, pk) in circuits.iter().zip(prove_keys) {
             if circuit.eval_domain_size()? != n {

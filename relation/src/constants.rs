@@ -19,7 +19,9 @@ pub const GATE_WIDTH: usize = 4;
 /// The number of multiplication selectors.
 pub const N_MUL_SELECTORS: usize = 2;
 /// The number of TurboPlonk selectors.
-pub const N_TURBO_PLONK_SELECTORS: usize = 13;
+// pub const N_TURBO_PLONK_SELECTORS: usize = 13;
+/// The number of relaxed TurboPlonk selectors.
+pub const N_TURBO_PLONK_SELECTORS: usize = 14;
 
 /// Compute constants K0, K1, ..., K_{`num_wire_types`-1} so that cosets {Ki *
 /// H} are disjoint, each coset |Ki * H| = `coset_size`.

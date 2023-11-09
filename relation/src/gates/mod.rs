@@ -51,6 +51,10 @@ pub trait Gate<F: Field>: Downcast + DynClone {
     fn q_o(&self) -> F {
         F::zero()
     }
+    /// Error wire selector.
+    fn q_e(&self) -> F {
+        F::zero()
+    }
     /// UltraPlonk lookup selector.
     fn q_lookup(&self) -> F {
         F::zero()
