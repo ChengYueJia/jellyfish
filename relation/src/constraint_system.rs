@@ -25,8 +25,9 @@ use rayon::prelude::*;
 pub type GateId = usize;
 /// An index to the type of gate wires.
 /// There are 4 different types of input gate wires (with indices 0..3),
-/// 1 type of output gate wires (with index 4), and 1 type of lookup gate wires
-/// (with index 5).
+/// 1 type of error gate wires (with index 4)
+/// 1 type of output gate wires (with index 5), and 1 type of lookup gate wires
+/// (with index 6).
 pub type WireId = usize;
 /// An index to one of the witness values.
 pub type Variable = usize;
@@ -81,7 +82,7 @@ pub trait Circuit<F: Field> {
     fn num_inputs(&self) -> usize;
 
     /// The number of wire types of the circuit.
-    /// E.g., UltraPlonk has 4 different types of input wires, 1 type of output
+    /// E.g., UltraPlonk has 4 different types of input wires, 1 type of error wires, 1 type of output
     /// wires, and 1 type of lookup wires.
     fn num_wire_types(&self) -> usize;
 
@@ -299,8 +300,12 @@ pub trait Arithmetization<F: FftField>: Circuit<F> {
     }
 }
 
+/// The wire identifiers are [lc_0, lc_1, lc_2, lc_3, lc_o, lc_e, lc_r]
 /// The wire type identifier for range gates.
-const RANGE_WIRE_ID: usize = 5;
+// const RANGE_WIRE_ID: usize = 5;
+const RANGE_WIRE_ID: usize = 6;
+// The error type identifier for relaxed gates.
+const ERROR_WIRE_ID: usize = 5;
 /// The wire type identifier for the key index in a lookup gate
 const LOOKUP_KEY_WIRE_ID: usize = 0;
 /// The wire type identifiers for the searched pair values in a lookup gate
@@ -353,7 +358,9 @@ where
     /// The gate of each (algebraic) constraint
     gates: Vec<Box<dyn Gate<F>>>,
     /// The map from arithmetic/lookup gate wires to variables.
-    wire_variables: [Vec<Variable>; GATE_WIDTH + 2],
+    // wire_variables: [Vec<Variable>; GATE_WIDTH + 2],
+    /// The map from arithmetic/relaxed/lookup gate wires to variables.
+    wire_variables: [Vec<Variable>; GATE_WIDTH + 3],
     /// The IO gates for the list of public input variables.
     pub_input_gate_ids: Vec<GateId>,
     /// The actual values of variables.
@@ -418,7 +425,7 @@ impl<F: FftField> PlonkCircuit<F> {
             wire_permutation: vec![],
             extended_id_permutation: vec![],
             num_wire_types: GATE_WIDTH
-                + 1
+                + 2
                 + match plonk_params.plonk_type {
                     PlonkType::TurboPlonk => 0,
                     PlonkType::UltraPlonk => 1,
@@ -452,14 +459,14 @@ impl<F: FftField> PlonkCircuit<F> {
     /// * `returns` - an error if some verification fails
     pub fn insert_gate(
         &mut self,
-        wire_vars: &[Variable; GATE_WIDTH + 1],
+        wire_vars: &[Variable; GATE_WIDTH + 2],
         gate: Box<dyn Gate<F>>,
     ) -> Result<(), CircuitError> {
         self.check_finalize_flag(false)?;
 
         for (wire_var, wire_variable) in wire_vars
             .iter()
-            .zip(self.wire_variables.iter_mut().take(GATE_WIDTH + 1))
+            .zip(self.wire_variables.iter_mut().take(GATE_WIDTH + 2))
         {
             wire_variable.push(*wire_var)
         }
@@ -571,6 +578,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.num_wire_types
     }
 
+    // set w_o (wire identity is GATE_WIDTH = 4) as a public variable if needs
     fn public_input(&self) -> Result<Vec<F>, CircuitError> {
         self.pub_input_gate_ids
             .iter()
@@ -885,7 +893,7 @@ impl<F: FftField> PlonkCircuit<F> {
     /// Check that the `gate_id`-th gate is satisfied by the circuit's witness
     /// and the public input value `pub_input`. `gate_id` is guaranteed to
     /// be in the range. The gate equation:
-    /// qo * wo = pub_input + q_c +
+    /// qo * wo + q_e * we = pub_input + q_c +
     ///           q_mul0 * w0 * w1 + q_mul1 * w2 * w3 +
     ///           q_lc0 * w0 + q_lc1 * w1 + q_lc2 * w2 + q_lc3 * w3 +
     ///           q_hash0 * w0 + q_hash1 * w1 + q_hash2 * w2 + q_hash3 * w3 +
@@ -893,7 +901,7 @@ impl<F: FftField> PlonkCircuit<F> {
     fn check_gate(&self, gate_id: Variable, pub_input: &F) -> Result<(), CircuitError> {
         // Compute wire values
 
-        let w_vals: Vec<F> = (0..GATE_WIDTH + 1)
+        let w_vals: Vec<F> = (0..GATE_WIDTH + 2)
             .map(|i| self.witness[self.wire_variables[i][gate_id]])
             .collect();
         // Compute selector values.
@@ -902,6 +910,7 @@ impl<F: FftField> PlonkCircuit<F> {
         let q_hash: [F; GATE_WIDTH] = self.gates[gate_id].q_hash();
         let q_c = self.gates[gate_id].q_c();
         let q_o = self.gates[gate_id].q_o();
+        let q_e = self.gates[gate_id].q_e();
         let q_ecc = self.gates[gate_id].q_ecc();
 
         // Compute the gate output
@@ -919,17 +928,19 @@ impl<F: FftField> PlonkCircuit<F> {
             + q_hash[3] * w_vals[3].pow([5])
             + q_c;
         let gate_output = q_o * w_vals[4];
-        if expected_gate_output != gate_output {
+        let gate_error = q_e * w_vals[5];
+        if expected_gate_output != gate_output + gate_error {
             return Err(
                 GateCheckFailure(
                     gate_id,
                     format!(
-                        "gate: {:?}, wire values: {:?}, pub_input: {}, expected_gate_output: {}, gate_output: {}",
+                        "gate: {:?}, wire values: {:?}, pub_input: {}, expected_gate_output: {}, gate_output: {}, gate_error: {}",
                         self.gates[gate_id],
                         w_vals,
                         pub_input,
                         expected_gate_output,
-                        gate_output
+                        gate_output,
+                        gate_error
                     )
                 ));
         }
@@ -1055,6 +1066,11 @@ impl<F: FftField> PlonkCircuit<F> {
     fn q_o(&self) -> Vec<F> {
         self.gates.iter().map(|g| g.q_o()).collect()
     }
+    // getter for all error selector
+    #[inline]
+    fn q_e(&self) -> Vec<F> {
+        self.gates.iter().map(|g| g.q_e()).collect()
+    }
     // getter for all constant selector
     #[inline]
     fn q_c(&self) -> Vec<F> {
@@ -1098,6 +1114,7 @@ impl<F: FftField> PlonkCircuit<F> {
             .chain(self.q_hash().as_ref().iter())
             .for_each(|s| selectors.push(s.clone()));
         selectors.push(self.q_o());
+        selectors.push(self.q_e());
         selectors.push(self.q_c());
         selectors.push(self.q_ecc());
         if self.support_lookup() {
