@@ -85,7 +85,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             )?;
         }
         // final round
-        let wires = [accum, padded[2], padded[1], padded[0], a];
+        let wires = [accum, padded[2], padded[1], padded[0], a, self.zero()];
         self.lc_gate(&wires, &coeffs)?;
 
         Ok(())

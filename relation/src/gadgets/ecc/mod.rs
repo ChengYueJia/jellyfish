@@ -200,7 +200,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             // create new point with the same (x, y) coordinates
             self.create_point_variable(selected)?
         };
-        let wire_vars_x = [b0.into(), b1.into(), 0, 0, selected_point.0];
+        let wire_vars_x = [b0.into(), b1.into(), 0, 0, selected_point.0, 0];
         self.insert_gate(
             &wire_vars_x,
             Box::new(QuaternaryPointSelectXGate {
@@ -209,7 +209,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 x3: point3.0,
             }),
         )?;
-        let wire_vars_y = [b0.into(), b1.into(), 0, 0, selected_point.1];
+        let wire_vars_y = [b0.into(), b1.into(), 0, 0, selected_point.1, 0];
         self.insert_gate(
             &wire_vars_y,
             Box::new(QuaternaryPointSelectYGate {
@@ -304,7 +304,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // constraint 2: b_y = is_equal(y, 1);
         let b_y = self.is_equal(point_var.1, self.one())?;
         // constraint 3: b = b_x * b_y;
-        self.mul_gate(b_x.into(), b_y.into(), expected_neutral.into())?;
+        let err = self.create_variable(F::zero())?;
+        self.mul_gate(b_x.into(), b_y.into(), expected_neutral.into(), err)?;
         Ok(())
     }
 
@@ -344,7 +345,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         self.check_point_var_bound(point_var)?;
 
         let (x, y) = (point_var.0, point_var.1);
-        let wire_vars = [x, x, y, y, 1];
+        let wire_vars = [x, x, y, y, 1, 0];
         self.insert_gate(
             &wire_vars,
             Box::new(EdwardsCurveEquationGate::<P> {
@@ -373,14 +374,14 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let (x_2, y_2) = (point_b.0, point_b.1);
         let (x_3, y_3) = (point_c.0, point_c.1);
 
-        let x_coordinate_wire_vars = [x_1, y_2, x_2, y_1, x_3];
+        let x_coordinate_wire_vars = [x_1, y_2, x_2, y_1, x_3, 0];
         self.insert_gate(
             &x_coordinate_wire_vars,
             Box::new(CurvePointXAdditionGate::<P> {
                 _phantom: PhantomData,
             }),
         )?;
-        let y_coordinate_wire_vars = [x_1, x_2, y_1, y_2, y_3];
+        let y_coordinate_wire_vars = [x_1, x_2, y_1, y_2, y_3, 0];
         self.insert_gate(
             &y_coordinate_wire_vars,
             Box::new(CurvePointYAdditionGate::<P> {

@@ -29,10 +29,11 @@ impl<F: PrimeField> PlonkCircuit<F> {
     /// wire. Return error if variables are invalid.
     pub fn quad_poly_gate(
         &mut self,
-        wires: &[Variable; GATE_WIDTH + 1],
+        wires: &[Variable; GATE_WIDTH + 2],
         q_lc: &[F; GATE_WIDTH],
         q_mul: &[F; N_MUL_SELECTORS],
         q_o: F,
+        q_e: F,
         q_c: F,
     ) -> Result<(), CircuitError> {
         self.check_vars_bound(wires)?;
@@ -43,6 +44,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 q_lc: *q_lc,
                 q_mul: *q_mul,
                 q_o,
+                q_e,
                 q_c,
             }),
         )?;
@@ -74,7 +76,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
             + q_mul[1] * self.witness(wires[2])? * self.witness(wires[3])?
             + q_c;
         let output_var = self.create_variable(output_val)?;
-        let wires = [wires[0], wires[1], wires[2], wires[3], output_var];
+        let err = self.create_variable(F::zero())?;
+        let wires = [wires[0], wires[1], wires[2], wires[3], output_var, err];
 
         self.insert_gate(
             &wires,
@@ -82,6 +85,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 q_lc: *q_lc,
                 q_mul: *q_mul,
                 q_o: F::one(),
+                q_e: F::one(),
                 q_c,
             }),
         )?;
@@ -93,12 +97,12 @@ impl<F: PrimeField> PlonkCircuit<F> {
     /// q1 * a + q2 * b + q3 * c + q4 * d  = y
     pub fn lc_gate(
         &mut self,
-        wires: &[Variable; GATE_WIDTH + 1],
+        wires: &[Variable; GATE_WIDTH + 2],
         coeffs: &[F; GATE_WIDTH],
     ) -> Result<(), CircuitError> {
         self.check_vars_bound(wires)?;
 
-        let wire_vars = [wires[0], wires[1], wires[2], wires[3], wires[4]];
+        let wire_vars = [wires[0], wires[1], wires[2], wires[3], wires[4], wires[5]];
         self.insert_gate(&wire_vars, Box::new(LinCombGate { coeffs: *coeffs }))?;
         Ok(())
     }
@@ -125,7 +129,14 @@ impl<F: PrimeField> PlonkCircuit<F> {
             .sum();
         let y = self.create_variable(y_val)?;
 
-        let wires = [wires_in[0], wires_in[1], wires_in[2], wires_in[3], y];
+        let wires = [
+            wires_in[0],
+            wires_in[1],
+            wires_in[2],
+            wires_in[3],
+            y,
+            self.zero(),
+        ];
         self.lc_gate(&wires, coeffs)?;
         Ok(y)
     }
@@ -135,12 +146,12 @@ impl<F: PrimeField> PlonkCircuit<F> {
     /// wires\[3\] = wires\[4\]
     pub fn mul_add_gate(
         &mut self,
-        wires: &[Variable; GATE_WIDTH + 1],
+        wires: &[Variable; GATE_WIDTH + 2],
         q_muls: &[F; N_MUL_SELECTORS],
     ) -> Result<(), CircuitError> {
         self.check_vars_bound(wires)?;
 
-        let wire_vars = [wires[0], wires[1], wires[2], wires[3], wires[4]];
+        let wire_vars = [wires[0], wires[1], wires[2], wires[3], wires[4], wires[5]];
         self.insert_gate(&wire_vars, Box::new(MulAddGate { coeffs: *q_muls }))?;
         Ok(())
     }
@@ -163,8 +174,9 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // calculate y as the mul-addition of coeffs and vals_in
         let y_val = q_muls[0] * vals_in[0] * vals_in[1] + q_muls[1] * vals_in[2] * vals_in[3];
         let y = self.create_variable(y_val)?;
+        let err = self.create_variable(F::zero())?;
 
-        let wires = [wires_in[0], wires_in[1], wires_in[2], wires_in[3], y];
+        let wires = [wires_in[0], wires_in[1], wires_in[2], wires_in[3], y, err];
         self.mul_add_gate(&wires, q_muls)?;
         Ok(y)
     }
@@ -217,6 +229,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             padded[padded_len - 2],
             padded[padded_len - 1],
             sum,
+            self.zero(),
         ];
         self.lc_gate(&wires, &coeffs)?;
 
@@ -234,7 +247,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         self.check_var_bound(x)?;
         self.check_var_bound(y)?;
 
-        let wire_vars = &[x, self.one(), 0, 0, y];
+        let wire_vars = &[x, self.one(), 0, 0, y, 0];
         self.insert_gate(wire_vars, Box::new(ConstantAdditionGate(c)))?;
         Ok(())
     }
@@ -268,7 +281,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         self.check_var_bound(x)?;
         self.check_var_bound(y)?;
 
-        let wire_vars = &[x, 0, 0, 0, y];
+        let wire_vars = &[x, 0, 0, 0, y, 0];
         self.insert_gate(wire_vars, Box::new(ConstantMultiplicationGate(c)))?;
         Ok(())
     }
@@ -300,7 +313,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let x_val = self.witness(x)?;
         let x_to_5_val = x_val.pow([5]);
         let x_to_5 = self.create_variable(x_to_5_val)?;
-        let wire_vars = &[x, 0, 0, 0, x_to_5];
+        let err = self.create_variable(F::zero())?;
+        let wire_vars = &[x, 0, 0, 0, x_to_5, err];
         self.insert_gate(wire_vars, Box::new(FifthRootGate))?;
 
         let x_to_10 = self.mul(x_to_5, x_to_5)?;
@@ -317,11 +331,13 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let x_val = self.witness(x)?;
         let x_to_5_val = x_val.pow([5]);
         let x_to_5 = self.create_variable(x_to_5_val)?;
-        let wire_vars = &[x, 0, 0, 0, x_to_5];
+        let e_to_5 = self.create_variable(F::zero())?;
+        let wire_vars = &[x, 0, 0, 0, x_to_5, e_to_5];
         self.insert_gate(wire_vars, Box::new(FifthRootGate))?;
 
         let x_to_10 = self.mul(x_to_5, x_to_5)?;
-        self.mul_gate(x_to_10, x, x_to_11)
+        let e_to_11 = self.create_variable(F::zero())?;
+        self.mul_gate(x_to_10, x, x_to_11, e_to_11)
     }
 
     /// Obtain the truncation of the input.
@@ -448,7 +464,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
 
         // step 4. prove equations (4) - (9)
         // (4) b = b1 + b2 * 2^bit_length_lookup_component
-        let wires = [b1_var, b2_var, self.zero(), self.zero(), b];
+        let wires = [b1_var, b2_var, self.zero(), self.zero(), b, self.zero()];
         let coeffs = [
             F::one(),
             two_to_bit_length_lookup_component,
@@ -459,7 +475,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
 
         // (5) a = b + modulus * z1
         //       + modulus * 2^delta_length_lookup_component * z2
-        let wires = [b, z1_var, z2_var, self.zero(), a];
+        let wires = [b, z1_var, z2_var, self.zero(), a, self.zero()];
         let coeffs = [
             F::one(),
             modulus,
@@ -527,6 +543,7 @@ mod test {
         let q_lc = [F::from(2u32), F::from(3u32), F::from(5u32), F::from(2u32)];
         let q_mul = [F::one(), F::from(2u8)];
         let q_o = F::one();
+        let q_e = F::one();
         let q_c = F::from(9u8);
         let wires_1: Vec<_> = [
             F::from(23u32),
@@ -551,15 +568,22 @@ mod test {
 
         // 23 * 2 + 8 * 3 + 1 * 5 + (-20) * 2 + 23 * 8 + 2 * 1 * (-20) + 9 = 188
         let var = wires_1[0];
-        circuit.quad_poly_gate(&wires_1.try_into().unwrap(), &q_lc, &q_mul, q_o, q_c)?;
+        circuit.quad_poly_gate(&wires_1.try_into().unwrap(), &q_lc, &q_mul, q_o, q_e, q_c)?;
         // 0 * 2 + (-8) * 3 + 1 * 5 + 0 * 2 + 0 * -8 + 1 * 0 + 9 = -10
-        circuit.quad_poly_gate(&wires_2.try_into().unwrap(), &q_lc, &q_mul, q_o, q_c)?;
+        circuit.quad_poly_gate(&wires_2.try_into().unwrap(), &q_lc, &q_mul, q_o, q_e, q_c)?;
         assert!(circuit.check_circuit_satisfiability(&[]).is_ok());
         *circuit.witness_mut(var) = F::from(34u32);
         assert!(circuit.check_circuit_satisfiability(&[]).is_err());
         // Check variable out of bound error.
         assert!(circuit
-            .quad_poly_gate(&[0, 1, 1, circuit.num_vars(), 0], &q_lc, &q_mul, q_o, q_c)
+            .quad_poly_gate(
+                &[0, 1, 1, circuit.num_vars(), 0, 0],
+                &q_lc,
+                &q_mul,
+                q_o,
+                q_e,
+                q_c
+            )
             .is_err());
 
         let circuit_1 = build_quad_poly_gate_circuit([
@@ -591,8 +615,9 @@ mod test {
         let q_lc = [F::from(2u32), F::from(3u32), F::from(5u32), F::from(2u32)];
         let q_mul = [F::one(), F::from(2u8)];
         let q_o = F::one();
+        let q_e = F::one();
         let q_c = F::from(9u8);
-        circuit.quad_poly_gate(&wires.try_into().unwrap(), &q_lc, &q_mul, q_o, q_c)?;
+        circuit.quad_poly_gate(&wires.try_into().unwrap(), &q_lc, &q_mul, q_o, q_e, q_c)?;
         circuit.finalize_for_arithmetization()?;
         Ok(circuit)
     }

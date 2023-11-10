@@ -103,7 +103,8 @@ pub trait Circuit<F: Field> {
     fn create_boolean_variable(&mut self, val: bool) -> Result<BoolVar, CircuitError> {
         let val_scalar = if val { F::one() } else { F::zero() };
         let var = self.create_variable(val_scalar)?;
-        self.enforce_bool(var)?;
+        let err = self.create_variable(F::zero())?;
+        self.enforce_bool(var, err)?;
         Ok(BoolVar(var))
     }
 
@@ -167,7 +168,13 @@ pub trait Circuit<F: Field> {
 
     /// Constrain variable `c` to the multiplication of `a` and `b`.
     /// Return error if the input variables are invalid.
-    fn mul_gate(&mut self, a: Variable, b: Variable, c: Variable) -> Result<(), CircuitError>;
+    fn mul_gate(
+        &mut self,
+        a: Variable,
+        b: Variable,
+        c: Variable,
+        e: Variable,
+    ) -> Result<(), CircuitError>;
 
     /// Obtain a variable representing a multiplication.
     /// Return the index of the variable.
@@ -176,7 +183,7 @@ pub trait Circuit<F: Field> {
 
     /// Constrain a variable to a bool.
     /// Return error if the input is invalid.
-    fn enforce_bool(&mut self, a: Variable) -> Result<(), CircuitError>;
+    fn enforce_bool(&mut self, a: Variable, e: Variable) -> Result<(), CircuitError>;
 
     /// Constrain two variables to have the same value.
     /// Return error if the input variables are invalid.
@@ -358,7 +365,7 @@ where
     /// The gate of each (algebraic) constraint
     gates: Vec<Box<dyn Gate<F>>>,
     /// The map from arithmetic/lookup gate wires to variables.
-    // wire_variables: [Vec<Variable>; GATE_WIDTH + 2],
+    // wire_variables: [Vec<Variable>; GATE_WIDTH + 3],
     /// The map from arithmetic/relaxed/lookup gate wires to variables.
     /// wire identities are [w_0, w_1, w_2, w_3, w_o, w_e, w_r]
     wire_variables: [Vec<Variable>; GATE_WIDTH + 3],
@@ -368,9 +375,9 @@ where
     witness: Vec<F>,
 
     /// The permutation over wires.
-    /// Each algebraic gate has 5 wires, i.e., 4 input wires and an output
-    /// wire; each lookup gate has a single wire that maps to a witness to
-    /// be checked over the lookup table. In total there are 6 * n wires
+    /// Each relaxed algebraic gate has 6 wires, i.e., 4 input wires, an output
+    /// wire, and an error wire; each lookup gate has a single wire that maps to a witness to
+    /// be checked over the lookup table. In total there are 7 * n wires
     /// where n is the (padded) number of arithmetic/lookup gates.  
     /// We build a permutation over the set of wires so that each set of wires
     /// that map to the same witness forms a cycle.
@@ -378,11 +385,11 @@ where
     /// Each wire is represented by a pair (`WireId, GateId`) so that the wire
     /// is in the `GateId`-th arithmetic/lookup gate and `WireId` represents
     /// the wire type (e.g., 0 represents 1st input wires, 4 represents
-    /// output wires, and 5 represents lookup wires).
+    /// output wires, 5 represents error wires, and 6 represents lookup wires).
     wire_permutation: Vec<(WireId, GateId)>,
     /// The extended identity permutation.
     extended_id_permutation: Vec<F>,
-    /// The number of wire types. 5 for TurboPlonk and 6 for UltraPlonk.
+    /// The number of wire types. 6 for TurboPlonk and 7 for UltraPlonk.
     num_wire_types: usize,
 
     /// The evaluation domain for arithmetization of the circuit into various
@@ -420,7 +427,7 @@ impl<F: FftField> PlonkCircuit<F> {
             witness: vec![zero, one],
             gates: vec![],
             // size is `num_wire_types`
-            wire_variables: [vec![], vec![], vec![], vec![], vec![], vec![]],
+            wire_variables: [vec![], vec![], vec![], vec![], vec![], vec![], vec![]],
             pub_input_gate_ids: vec![],
 
             wire_permutation: vec![],
@@ -682,7 +689,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.pub_input_gate_ids.push(self.num_gates());
 
         // Create an io gate that forces `witness[var] = public_input`.
-        let wire_vars = &[0, 0, 0, 0, var];
+        let wire_vars = &[0, 0, 0, 0, var, 0];
         self.insert_gate(wire_vars, Box::new(IoGate))?;
         Ok(())
     }
@@ -705,7 +712,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
     fn enforce_constant(&mut self, var: Variable, constant: F) -> Result<(), CircuitError> {
         self.check_var_bound(var)?;
 
-        let wire_vars = &[0, 0, 0, 0, var];
+        let wire_vars = &[0, 0, 0, 0, var, 0];
         self.insert_gate(wire_vars, Box::new(ConstantGate(constant)))?;
         Ok(())
     }
@@ -715,7 +722,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.check_var_bound(b)?;
         self.check_var_bound(c)?;
 
-        let wire_vars = &[a, b, 0, 0, c];
+        let wire_vars = &[a, b, 0, 0, c, 0];
         self.insert_gate(wire_vars, Box::new(AdditionGate))?;
         Ok(())
     }
@@ -734,7 +741,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.check_var_bound(b)?;
         self.check_var_bound(c)?;
 
-        let wire_vars = &[a, b, 0, 0, c];
+        let wire_vars = &[a, b, 0, 0, c, 0];
         self.insert_gate(wire_vars, Box::new(SubtractionGate))?;
         Ok(())
     }
@@ -748,12 +755,19 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         Ok(c)
     }
 
-    fn mul_gate(&mut self, a: Variable, b: Variable, c: Variable) -> Result<(), CircuitError> {
+    fn mul_gate(
+        &mut self,
+        a: Variable,
+        b: Variable,
+        c: Variable,
+        e: Variable,
+    ) -> Result<(), CircuitError> {
         self.check_var_bound(a)?;
         self.check_var_bound(b)?;
         self.check_var_bound(c)?;
+        self.check_var_bound(e)?;
 
-        let wire_vars = &[a, b, 0, 0, c];
+        let wire_vars = &[a, b, 0, 0, c, e];
         self.insert_gate(wire_vars, Box::new(MultiplicationGate))?;
         Ok(())
     }
@@ -763,14 +777,15 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.check_var_bound(b)?;
         let val = self.witness(a)? * self.witness(b)?;
         let c = self.create_variable(val)?;
-        self.mul_gate(a, b, c)?;
+        let e = self.create_variable(F::zero())?;
+        self.mul_gate(a, b, c, e)?;
         Ok(c)
     }
 
-    fn enforce_bool(&mut self, a: Variable) -> Result<(), CircuitError> {
+    fn enforce_bool(&mut self, a: Variable, e: Variable) -> Result<(), CircuitError> {
         self.check_var_bound(a)?;
 
-        let wire_vars = &[a, a, 0, 0, a];
+        let wire_vars = &[a, a, 0, 0, a, e];
         self.insert_gate(wire_vars, Box::new(BoolGate))?;
         Ok(())
     }
@@ -779,7 +794,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         self.check_var_bound(a)?;
         self.check_var_bound(b)?;
 
-        let wire_vars = &[a, b, 0, 0, 0];
+        let wire_vars = &[a, b, 0, 0, 0, 0];
         self.insert_gate(wire_vars, Box::new(EqualityGate))?;
         Ok(())
     }

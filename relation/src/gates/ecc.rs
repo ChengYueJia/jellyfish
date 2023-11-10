@@ -45,6 +45,9 @@ where
     fn q_c(&self) -> F {
         F::one()
     }
+    fn q_e(&self) -> F {
+        F::one()
+    }
     fn q_ecc(&self) -> F {
         edwards_coeff_d::<P>()
     }
@@ -69,6 +72,9 @@ where
         [F::one(), F::one()]
     }
     fn q_o(&self) -> F {
+        F::one()
+    }
+    fn q_e(&self) -> F {
         F::one()
     }
     fn q_ecc(&self) -> F {
@@ -96,6 +102,9 @@ where
         [-P::COEFF_A, F::one()]
     }
     fn q_o(&self) -> F {
+        F::one()
+    }
+    fn q_e(&self) -> F {
         F::one()
     }
     fn q_ecc(&self) -> F {
@@ -129,6 +138,9 @@ where
     fn q_o(&self) -> F {
         F::one()
     }
+    fn q_e(&self) -> F {
+        F::one()
+    }
 }
 
 /// A point selection gate on y-coordinate for conditional selection among 4
@@ -158,6 +170,9 @@ where
         F::one()
     }
     fn q_o(&self) -> F {
+        F::one()
+    }
+    fn q_e(&self) -> F {
         F::one()
     }
 }

@@ -206,6 +206,10 @@ impl<F: Field> Gate<F> for FifthRootGate {
     fn q_o(&self) -> F {
         F::one()
     }
+
+    fn q_e(&self) -> F {
+        F::one()
+    }
 }
 
 /// A deg-2 polynomial gate
