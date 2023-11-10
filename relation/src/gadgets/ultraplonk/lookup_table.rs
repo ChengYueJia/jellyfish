@@ -55,7 +55,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 ),
                 false => (F::zero(), F::zero(), self.zero(), self.zero()),
             };
-            let wire_vars = [key, val0, val1, table_val0, table_val1];
+            let wire_vars = [key, val0, val1, table_val0, table_val1, 0];
 
             self.insert_gate(
                 &wire_vars,

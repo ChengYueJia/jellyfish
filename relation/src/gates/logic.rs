@@ -52,4 +52,7 @@ where
     fn q_o(&self) -> F {
         F::one()
     }
+    fn q_e(&self) -> F {
+        F::one()
+    }
 }

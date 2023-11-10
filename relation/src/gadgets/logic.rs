@@ -20,7 +20,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
     pub fn logic_or_gate(&mut self, a: BoolVar, b: BoolVar) -> Result<(), CircuitError> {
         self.check_var_bound(a.into())?;
         self.check_var_bound(b.into())?;
-        let wire_vars = &[a.into(), b.into(), 0, 0, 0];
+        let wire_vars = &[a.into(), b.into(), 0, 0, 0, 0];
         self.insert_gate(wire_vars, Box::new(LogicOrGate))?;
         Ok(())
     }
@@ -54,14 +54,16 @@ impl<F: PrimeField> PlonkCircuit<F> {
         };
         let y = self.create_boolean_variable_unchecked(y)?;
         let a_inv = self.create_variable(a_inv)?;
+        let e_inv = self.create_variable(F::zero())?;
 
         // constraint 1: 1 - a * a^(-1) = y, i.e., a * a^(-1) + 1 * y = 1
         self.mul_add_gate(
-            &[a, a_inv, self.one(), y.into(), self.one()],
+            &[a, a_inv, self.one(), y.into(), self.one(), e_inv],
             &[F::one(), F::one()],
         )?;
         // constraint 2: multiplication y * a = 0
-        self.mul_gate(y.into(), a, self.zero())?;
+        let err = self.create_variable(F::zero())?;
+        self.mul_gate(y.into(), a, self.zero(), err)?;
         Ok(y)
     }
 
@@ -70,8 +72,9 @@ impl<F: PrimeField> PlonkCircuit<F> {
     pub fn non_zero_gate(&mut self, var: Variable) -> Result<(), CircuitError> {
         let inverse = self.witness(var)?.inverse().unwrap_or_else(F::zero);
         let inv_var = self.create_variable(inverse)?;
+        let err = self.create_variable(F::zero())?;
         let one_var = self.one();
-        self.mul_gate(var, inv_var, one_var)
+        self.mul_gate(var, inv_var, one_var, err)
     }
 
     /// Obtain a variable representing the result of a logic negation gate.
@@ -87,7 +90,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
     pub fn logic_and(&mut self, a: BoolVar, b: BoolVar) -> Result<BoolVar, CircuitError> {
         let c = self
             .create_boolean_variable_unchecked(self.witness(a.into())? * self.witness(b.into())?)?;
-        self.mul_gate(a.into(), b.into(), c.into())?;
+        let err = self.create_variable(F::zero())?;
+        self.mul_gate(a.into(), b.into(), c.into(), err)?;
         Ok(c)
     }
 
@@ -119,7 +123,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let c_val = a_val + b_val - a_val * b_val;
 
         let c = self.create_boolean_variable_unchecked(c_val)?;
-        let wire_vars = &[a.into(), b.into(), 0, 0, c.into()];
+        let err = self.create_variable(F::zero())?;
+        let wire_vars = &[a.into(), b.into(), 0, 0, c.into(), err];
         self.insert_gate(wire_vars, Box::new(LogicOrOutputGate))?;
 
         Ok(c)
@@ -159,7 +164,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 "b in Conditional Selection gate is not a boolean variable".to_string(),
             ));
         };
-        let wire_vars = [b.into(), x_0, b.into(), x_1, y];
+        let err = self.create_variable(F::zero())?;
+        let wire_vars = [b.into(), x_0, b.into(), x_1, y, err];
         self.insert_gate(&wire_vars, Box::new(CondSelectGate))?;
         Ok(y)
     }

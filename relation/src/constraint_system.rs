@@ -806,7 +806,7 @@ impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
         // the padded gate does not have a gate_id, and will bug
         // when we check circuit satisfiability
         // we temporarily insert equality gate to by pass the issue
-        let wire_vars = &[self.zero(), self.zero(), 0, 0, 0];
+        let wire_vars = &[self.zero(), self.zero(), 0, 0, 0, 0];
         for _ in 0..n {
             self.insert_gate(wire_vars, Box::new(EqualityGate)).unwrap();
         }
@@ -858,7 +858,7 @@ impl<F: FftField> PlonkCircuit<F> {
                 // Swap gate types
                 self.gates.swap(gate_id, *io_gate_id);
                 // Swap wire variables
-                for i in 0..GATE_WIDTH + 1 {
+                for i in 0..GATE_WIDTH + 2 {
                     self.wire_variables[i].swap(gate_id, *io_gate_id);
                 }
                 // Update io gate index
@@ -877,7 +877,7 @@ impl<F: FftField> PlonkCircuit<F> {
                         // Swap gate types
                         self.gates.swap(gate_id, cur_gate_id);
                         // Swap wire variables
-                        for j in 0..GATE_WIDTH + 1 {
+                        for j in 0..GATE_WIDTH + 2 {
                             self.wire_variables[j].swap(gate_id, cur_gate_id);
                         }
                         cur_gate_id -= 1;
@@ -1119,7 +1119,7 @@ impl<F: FftField> PlonkCircuit<F> {
     }
     // TODO: (alex) try return reference instead of expensive clone
     // getter for all selectors in the following order:
-    // q_lc, q_mul, q_hash, q_o, q_c, q_ecc, [q_lookup (if support lookup)]
+    // q_lc, q_mul, q_hash, q_o, q_e, q_c, q_ecc, [q_lookup (if support lookup)]
     #[inline]
     fn all_selectors(&self) -> Vec<Vec<F>> {
         let mut selectors = vec![];
@@ -1326,7 +1326,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // occupies the last n gates.
         let n = self.eval_domain_size()? / 2;
         let mut gates = vec![];
-        let mut wire_variables = [vec![], vec![], vec![], vec![], vec![], vec![]];
+        let mut wire_variables = [vec![], vec![], vec![], vec![], vec![], vec![], vec![]];
         for (j, gate) in self.gates.iter().take(n).enumerate() {
             gates.push((*gate).clone());
             for (i, wire_vars) in wire_variables
@@ -1396,7 +1396,7 @@ where
                 "Domain size should be bigger than number of constraint".to_string(),
             ));
         }
-        // order: (lc, mul, hash, o, c, ecc) as specified in spec
+        // order: (lc, mul, hash, o, e, c, ecc) as specified in spec
         let selector_polys = parallelizable_slice_iter(&self.all_selectors())
             .map(|selector| DensePolynomial::from_coefficients_vec(domain.ifft(selector)))
             .collect();
@@ -1748,7 +1748,8 @@ pub(crate) mod test {
         // Constant gate: a = 3.
         circuit.enforce_constant(a, F::from(3u32))?;
         // Bool gate: b is bool.
-        circuit.enforce_bool(b)?;
+        let e_b = circuit.create_variable(F::zero())?;
+        circuit.enforce_bool(b, e_b)?;
         // Addition gate: c = a + b = 4.
         let c = circuit.add(a, b)?;
         // Subtraction gate: d = a - b = 2.
@@ -1894,7 +1895,8 @@ pub(crate) mod test {
     fn test_bool_helper<F: PrimeField>() -> Result<(), CircuitError> {
         let mut circuit: PlonkCircuit<F> = PlonkCircuit::new_turbo_plonk();
         let a = circuit.create_variable(F::from(0u32))?;
-        circuit.enforce_bool(a)?;
+        let e_a = circuit.create_variable(F::zero())?;
+        circuit.enforce_bool(a, e_a)?;
 
         // Check circuits.
         assert!(circuit.check_circuit_satisfiability(&[]).is_ok());
@@ -1902,7 +1904,8 @@ pub(crate) mod test {
         assert!(circuit.check_circuit_satisfiability(&[]).is_err());
 
         // Check variable out of bound error.
-        assert!(circuit.enforce_bool(circuit.num_vars()).is_err());
+        let e_a = circuit.create_variable(F::zero())?;
+        assert!(circuit.enforce_bool(circuit.num_vars(), e_a).is_err());
 
         Ok(())
     }
@@ -1944,8 +1947,10 @@ pub(crate) mod test {
         let mut circuit = PlonkCircuit::<F>::new_turbo_plonk();
         let b = circuit.create_variable(F::from(0u32))?;
         let a = circuit.create_public_variable(F::from(1u32))?;
-        circuit.enforce_bool(a)?;
-        circuit.enforce_bool(b)?;
+        let e_a = circuit.create_variable(F::zero())?;
+        let e_b = circuit.create_variable(F::zero())?;
+        circuit.enforce_bool(a, e_a)?;
+        circuit.enforce_bool(b, e_b)?;
         circuit.set_variable_public(b)?;
 
         // Different valid public inputs should all pass the circuit check.
@@ -2025,7 +2030,7 @@ pub(crate) mod test {
         let a = circuit.create_variable(F::from(3u32))?;
         let b = circuit.create_public_variable(F::from(1u32))?;
         circuit.enforce_constant(a, F::from(3u32))?;
-        circuit.enforce_bool(b)?;
+        circuit.enforce_bool(b, circuit.create_variable(F::zero())?)?;
         let c = circuit.add(a, b)?;
         let d = circuit.sub(a, b)?;
         let e = circuit.mul(c, d)?;
@@ -2041,7 +2046,8 @@ pub(crate) mod test {
         let a = circuit.create_variable(F::from(3u32))?;
         let b = circuit.create_public_variable(F::from(1u32))?;
         circuit.enforce_constant(a, F::from(3u32))?;
-        circuit.enforce_bool(b)?;
+        let e_b = circuit.create_variable(F::zero())?;
+        circuit.enforce_bool(b, e_b)?;
         let c = circuit.add(a, b)?;
         let d = circuit.sub(a, b)?;
         let e = circuit.mul(c, d)?;
@@ -2211,9 +2217,13 @@ pub(crate) mod test {
         assert!(circuit.create_public_variable(F::one()).is_err());
         assert!(circuit.add_gate(0, 0, 0).is_err());
         assert!(circuit.sub_gate(0, 0, 0).is_err());
-        assert!(circuit.mul_gate(0, 0, 0).is_err());
+        assert!(circuit
+            .mul_gate(0, 0, 0, circuit.create_variable(F::zero())?)
+            .is_err());
         assert!(circuit.enforce_constant(0, F::one()).is_err());
-        assert!(circuit.enforce_bool(0).is_err());
+        assert!(circuit
+            .enforce_bool(0, circuit.create_variable(F::zero())?)
+            .is_err());
         assert!(circuit.enforce_equal(0, 0).is_err());
 
         Ok(())
@@ -2254,9 +2264,13 @@ pub(crate) mod test {
         assert!(circuit.create_public_variable(F::one()).is_err());
         assert!(circuit.add_gate(0, 0, 0).is_err());
         assert!(circuit.sub_gate(0, 0, 0).is_err());
-        assert!(circuit.mul_gate(0, 0, 0).is_err());
+        assert!(circuit
+            .mul_gate(0, 0, 0, circuit.create_variable(F::zero())?)
+            .is_err());
         assert!(circuit.enforce_constant(0, F::one()).is_err());
-        assert!(circuit.enforce_bool(0).is_err());
+        assert!(circuit
+            .enforce_bool(0, circuit.create_variable(F::zero())?)
+            .is_err());
         assert!(circuit.enforce_equal(0, 0).is_err());
         // Plookup-related methods
         assert!(circuit.add_range_check_variable(0).is_err());
