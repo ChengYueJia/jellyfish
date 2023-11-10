@@ -104,7 +104,7 @@ where
             // can either be the left or the right child of its parent
             let left_plus_right =
                 self.add(node.is_left_child.into(), node.is_right_child.into())?;
-            self.enforce_bool(left_plus_right)?;
+            self.enforce_bool(left_plus_right, self.zero())?;
         }
 
         let pos = self.create_variable(merkle_proof.pos.clone().into())?;

@@ -194,11 +194,13 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // checking that the carry_out has at most [`E::B`] + 1 bits
         self.enforce_in_range(carry_out, E::B + 1)?;
         // enforcing that a0 * b0 - k0 * modulus[0] - carry_out * 2^E::B = c0
+        let e_1 = self.create_variable(F::zero())?;
         self.quad_poly_gate(
-            &[a.0[0], b.0[0], k.0[0], carry_out, c.0[0]],
+            &[a.0[0], b.0[0], k.0[0], carry_out, c.0[0], e_1],
             &[F::zero(), F::zero(), neg_modulus[0], -b_pow],
             &[F::one(), F::zero()],
             F::one(),
+            F::zero(),
             F::zero(),
         )?;
 
@@ -266,7 +268,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let t4 = stack.pop().unwrap_or((self.zero(), F::zero()));
 
             // checking that the summation equals to i-th limb of c
-            self.lc_gate(&[t1.0, t2.0, t3.0, t4.0, c.0[i]], &[t1.1, t2.1, t3.1, t4.1])?;
+            self.lc_gate(
+                &[t1.0, t2.0, t3.0, t4.0, c.0[i], self.zero()],
+                &[t1.1, t2.1, t3.1, t4.1],
+            )?;
 
             val_carry_out = val_next_carry_out;
             carry_out = next_carry_out;
@@ -278,11 +283,13 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let k_mod = self.mod_to_native_field(&k)?;
         let c_mod = self.mod_to_native_field(c)?;
         let e_mod_f = F::from(E::MODULUS.into());
+        let e_1 = self.create_variable(F::zero())?;
         self.quad_poly_gate(
-            &[a_mod, b_mod, k_mod, self.zero(), c_mod],
+            &[a_mod, b_mod, k_mod, self.zero(), c_mod, e_1],
             &[F::zero(), F::zero(), -e_mod_f, F::zero()],
             &[F::one(), F::zero()],
             F::one(),
+            F::zero(),
             F::zero(),
         )?;
 
@@ -340,7 +347,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         self.enforce_in_range(carry_out, E::B + 1)?;
         // enforcing that a0 * b0 - k0 * modulus[0] - carry_out * 2^E::B = c0
         self.lc_gate(
-            &[a.0[0], k.0[0], carry_out, self.zero(), c.0[0]],
+            &[a.0[0], k.0[0], carry_out, self.zero(), c.0[0], self.zero()],
             &[b_limbs[0], neg_modulus[0], -b_pow, F::zero()],
         )?;
 
@@ -386,7 +393,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let t4 = stack.pop().unwrap_or((self.zero(), F::zero()));
 
             // checking that the summation equals to i-th limb of c
-            self.lc_gate(&[t1.0, t2.0, t3.0, t4.0, c.0[i]], &[t1.1, t2.1, t3.1, t4.1])?;
+            self.lc_gate(
+                &[t1.0, t2.0, t3.0, t4.0, c.0[i], self.zero()],
+                &[t1.1, t2.1, t3.1, t4.1],
+            )?;
 
             val_carry_out = val_next_carry_out;
             carry_out = next_carry_out;
@@ -399,7 +409,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let c_mod = self.mod_to_native_field(c)?;
         let e_mod_f = F::from(E::MODULUS.into());
         self.lc_gate(
-            &[a_mod, k_mod, self.zero(), self.zero(), c_mod],
+            &[a_mod, k_mod, self.zero(), self.zero(), c_mod, self.zero()],
             &[b_mod, -e_mod_f, F::zero(), F::zero()],
         )?;
 
@@ -452,9 +462,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let next_carry_out =
                 F::from(<F as Into<BigUint>>::into(self.witness(*a)? + self.witness(*b)?) / &b_pow);
             let next_carry_out = self.create_variable(next_carry_out)?;
-            self.enforce_bool(next_carry_out)?;
+            let e_1 = self.create_variable(F::zero())?;
+            self.enforce_bool(next_carry_out, e_1)?;
 
-            let wires = [*a, *b, carry_out, next_carry_out, *c];
+            let wires = [*a, *b, carry_out, next_carry_out, *c, self.zero()];
             let coeffs = [F::one(), F::one(), F::one(), -F::from(b_pow.clone())];
             self.lc_gate(&wires, &coeffs)?;
             carry_out = next_carry_out;
@@ -468,9 +479,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let next_carry_out =
                 F::from(<F as Into<BigUint>>::into(a * F::from(k) + self.witness(*b)?) / &b_pow);
             let next_carry_out = self.create_variable(next_carry_out)?;
-            self.enforce_bool(next_carry_out)?;
+            let e_1 = self.create_variable(F::zero())?;
+            self.enforce_bool(next_carry_out, e_1)?;
 
-            let wires = [var_k, *b, carry_out, next_carry_out, *c];
+            let wires = [var_k, *b, carry_out, next_carry_out, *c, self.zero()];
             let coeffs = [a, F::one(), F::one(), -F::from(b_pow.clone())];
             self.lc_gate(&wires, &coeffs)?;
             carry_out = next_carry_out;
@@ -535,9 +547,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let next_carry_out =
                 F::from(<F as Into<BigUint>>::into(self.witness(*a)? + b) / &b_pow);
             let next_carry_out = self.create_variable(next_carry_out)?;
-            self.enforce_bool(next_carry_out)?;
+            let e_1 = self.create_variable(F::zero())?;
+            self.enforce_bool(next_carry_out, e_1)?;
 
-            let wires = [*a, self.one(), carry_out, next_carry_out, *c];
+            let wires = [*a, self.one(), carry_out, next_carry_out, *c, self.zero()];
             let coeffs = [F::one(), b, F::one(), -F::from(b_pow.clone())];
             self.lc_gate(&wires, &coeffs)?;
             carry_out = next_carry_out;
@@ -551,9 +564,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
             let next_carry_out =
                 F::from(<F as Into<BigUint>>::into(a * F::from(k) + self.witness(*b)?) / &b_pow);
             let next_carry_out = self.create_variable(next_carry_out)?;
-            self.enforce_bool(next_carry_out)?;
+            let e_1 = self.create_variable(F::zero())?;
+            self.enforce_bool(next_carry_out, e_1)?;
 
-            let wires = [var_k, *b, carry_out, next_carry_out, *c];
+            let wires = [var_k, *b, carry_out, next_carry_out, *c, self.zero()];
             let coeffs = [a, F::one(), F::one(), -F::from(b_pow.clone())];
             self.lc_gate(&wires, &coeffs)?;
             carry_out = next_carry_out;

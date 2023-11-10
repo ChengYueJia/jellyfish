@@ -2030,7 +2030,8 @@ pub(crate) mod test {
         let a = circuit.create_variable(F::from(3u32))?;
         let b = circuit.create_public_variable(F::from(1u32))?;
         circuit.enforce_constant(a, F::from(3u32))?;
-        circuit.enforce_bool(b, circuit.create_variable(F::zero())?)?;
+        let e_1 = circuit.create_variable(F::zero())?;
+        circuit.enforce_bool(b, e_1)?;
         let c = circuit.add(a, b)?;
         let d = circuit.sub(a, b)?;
         let e = circuit.mul(c, d)?;
@@ -2217,13 +2218,11 @@ pub(crate) mod test {
         assert!(circuit.create_public_variable(F::one()).is_err());
         assert!(circuit.add_gate(0, 0, 0).is_err());
         assert!(circuit.sub_gate(0, 0, 0).is_err());
-        assert!(circuit
-            .mul_gate(0, 0, 0, circuit.create_variable(F::zero())?)
-            .is_err());
+        let e_1 = circuit.create_variable(F::zero())?;
+        assert!(circuit.mul_gate(0, 0, 0, e_1).is_err());
         assert!(circuit.enforce_constant(0, F::one()).is_err());
-        assert!(circuit
-            .enforce_bool(0, circuit.create_variable(F::zero())?)
-            .is_err());
+        let e_2 = circuit.create_variable(F::zero())?;
+        assert!(circuit.enforce_bool(0, e_2).is_err());
         assert!(circuit.enforce_equal(0, 0).is_err());
 
         Ok(())
@@ -2264,13 +2263,11 @@ pub(crate) mod test {
         assert!(circuit.create_public_variable(F::one()).is_err());
         assert!(circuit.add_gate(0, 0, 0).is_err());
         assert!(circuit.sub_gate(0, 0, 0).is_err());
-        assert!(circuit
-            .mul_gate(0, 0, 0, circuit.create_variable(F::zero())?)
-            .is_err());
+        let e_1 = circuit.create_variable(F::zero())?;
+        assert!(circuit.mul_gate(0, 0, 0, e_1).is_err());
         assert!(circuit.enforce_constant(0, F::one()).is_err());
-        assert!(circuit
-            .enforce_bool(0, circuit.create_variable(F::zero())?)
-            .is_err());
+        let e_2 = circuit.create_variable(F::zero())?;
+        assert!(circuit.enforce_bool(0, e_2).is_err());
         assert!(circuit.enforce_equal(0, 0).is_err());
         // Plookup-related methods
         assert!(circuit.add_range_check_variable(0).is_err());

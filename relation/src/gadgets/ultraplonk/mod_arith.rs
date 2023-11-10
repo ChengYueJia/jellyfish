@@ -109,7 +109,7 @@ impl<F: PrimeField> FpElemVar<F> {
         let var0 = cs.create_variable(fp_elem.p.0)?;
         let var1 = cs.create_variable(fp_elem.p.1)?;
         cs.lc_gate(
-            &[var0, var1, cs.zero(), cs.zero(), var],
+            &[var0, var1, cs.zero(), cs.zero(), var, cs.zero()],
             &[F::one(), fp_elem.two_power_m, F::zero(), F::zero()],
         )?;
 
@@ -295,7 +295,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
         }
         // final round
         let coeffs = [F::one(), F::one(), F::one(), p.neg()];
-        let wires = [accum, padded[2], padded[1], padded[0], y_var];
+        let wires = [accum, padded[2], padded[1], padded[0], y_var, self.zero()];
         self.lc_gate(&wires, &coeffs)?;
 
         Ok(y_var)
@@ -423,13 +423,21 @@ impl<F: PrimeField> PlonkCircuit<F> {
         self.range_gate_with_lookup(remainder_var, range_bit_len * num_range_blocks)?;
 
         // add constraint: x - remainder - p * divisor  + y = 0
-        let wires = [x_var, remainder_var, divisor_var, self.zero(), self.zero()];
+        let wires = [
+            x_var,
+            remainder_var,
+            divisor_var,
+            self.zero(),
+            self.zero(),
+            self.zero(),
+        ];
         let q_lc = [F::one(), -F::one(), -p_f, F::zero()];
         let q_mul = [F::zero(), F::zero()];
         let q_o = F::zero();
+        let q_e = F::zero();
         let q_c = y_f;
 
-        self.quad_poly_gate(&wires, &q_lc, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lc, &q_mul, q_o, q_e, q_c)?;
 
         FpElemVar::new_unchecked(self, remainder_var, x.m, Some(p.two_power_m))
     }
@@ -597,12 +605,20 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // Eq.(3): z0 + w0p0 - x0y0 - 2^m c0' = 0 where c0' := c0 - 2^m
         // ==============================================
         // x0y0 - p0w0 + 2^m * c0 - 2^{2m} = z0
-        let wires = [x.vars.0, y.vars.0, w0_var, c0_var, z0_var];
+        let wires = [
+            x.vars.0,
+            y.vars.0,
+            w0_var,
+            c0_var,
+            z0_var,
+            self.create_variable(F::zero())?,
+        ];
         let q_lin = [F::zero(), F::zero(), -p.p.0, p.two_power_m];
         let q_mul = [F::one(), F::zero()];
         let q_o = F::one();
+        let q_e = F::zero();
         let q_c = -p.two_power_m.square();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         // ==============================================
         // Eq.(4): z1 + w0p1 + w1p0 - x0y1 - x1y0 + c0' - 2^m c1' = 0
@@ -628,23 +644,39 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // where c0' := c0 - 2^m and c1' := c1 - 2^{m+1}
         // ===============================================
         // t1 - t2 - c0 + 2^m * c1 - 2^{2m+1} + 2^m = z1
-        let wires = [t1_var, t2_var, c0_var, c1_var, z1_var];
+        let wires = [
+            t1_var,
+            t2_var,
+            c0_var,
+            c1_var,
+            z1_var,
+            self.create_variable(F::zero())?,
+        ];
         let q_lin = [F::one(), -F::one(), -F::one(), p.two_power_m];
         let q_mul = [F::zero(), F::zero()];
         let q_o = F::one();
+        let q_e = F::zero();
         let q_c = p.two_power_m - p.two_power_m.square().double();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         // ==============================================
         // Eq.(5): w1p1 - x1y1 + c1' = 0 where c1' := c1 - 2^{m+1}
         // ==============================================
         // x1y1 - p1w1 + 2^{m+1} = c1
-        let wires = [x.vars.1, y.vars.1, w1_var, self.zero(), c1_var];
+        let wires = [
+            x.vars.1,
+            y.vars.1,
+            w1_var,
+            self.zero(),
+            c1_var,
+            self.create_variable(F::zero())?,
+        ];
         let q_lin = [F::zero(), F::zero(), -p.p.1, F::zero()];
         let q_mul = [F::one(), F::zero()];
         let q_o = F::one();
+        let q_e = F::zero();
         let q_c = p.two_power_m.double();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         Ok(FpElemVar {
             vars: (z0_var, z1_var),
@@ -780,12 +812,13 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // Note: this use same number of constraints as mul_mod
         // ==============================================
         // y0x0 - p0w0 + 2^m * c0 - z0 - 2^{2m} = 0
-        let wires = [x.vars.0, w0_var, c0_var, z0_var, self.zero()];
+        let wires = [x.vars.0, w0_var, c0_var, z0_var, self.zero(), self.zero()];
         let q_lin = [y.p.0, -p.p.0, p.two_power_m, -F::one()];
         let q_mul = [F::zero(), F::zero()];
         let q_o = F::zero();
+        let q_e = F::zero();
         let q_c = -p.two_power_m.square();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         // ==============================================
         // Eq.(4): z1 + w0p1 + w1p0 - x0y1 - x1y0 + c0' - 2^m c1' = 0
@@ -806,23 +839,32 @@ impl<F: PrimeField> PlonkCircuit<F> {
         // where c0' := c0 - 2^m and c1' := c1 - 2^{m+1}
         // ===============================================
         // t - z1 - c0 + 2^m * c1 - 2^{2m+1} + 2^m = 0
-        let wires = [t1_var, z1_var, c0_var, c1_var, self.zero()];
+        let wires = [t1_var, z1_var, c0_var, c1_var, self.zero(), self.zero()];
         let q_lin = [F::one(), -F::one(), -F::one(), p.two_power_m];
         let q_mul = [F::zero(), F::zero()];
         let q_o = F::zero();
+        let q_e = F::zero();
         let q_c = p.two_power_m - p.two_power_m.square().double();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         // ==============================================
         // Eq.(5): w1p1 - x1y1 + c1' = 0 where c1' := c1 - 2^{m+1}
         // ==============================================
         // x1y1 - p1w1 - c1 + 2^{m+1} = 0
-        let wires = [x.vars.1, w1_var, c1_var, self.zero(), self.zero()];
+        let wires = [
+            x.vars.1,
+            w1_var,
+            c1_var,
+            self.zero(),
+            self.zero(),
+            self.zero(),
+        ];
         let q_lin = [y.p.1, -p.p.1, -F::one(), F::zero()];
         let q_mul = [F::zero(), F::zero()];
         let q_o = F::zero();
+        let q_e = F::zero();
         let q_c = p.two_power_m.double();
-        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_c)?;
+        self.quad_poly_gate(&wires, &q_lin, &q_mul, q_o, q_e, q_c)?;
 
         Ok(FpElemVar {
             vars: (z0_var, z1_var),
@@ -858,7 +900,14 @@ impl<F: PrimeField> PlonkCircuit<F> {
         let x_var = x.convert_to_var(self)?;
         let x_neg_var = self.create_variable(x_negate)?;
 
-        let wires = [x_var, x_neg_var, self.one(), self.zero(), self.zero()];
+        let wires = [
+            x_var,
+            x_neg_var,
+            self.one(),
+            self.zero(),
+            self.zero(),
+            self.zero(),
+        ];
         let coeffs = [F::one(), F::one(), -*p, F::zero()];
 
         self.lc_gate(&wires, &coeffs)?;

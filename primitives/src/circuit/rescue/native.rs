@@ -388,12 +388,14 @@ where
         for (i, output) in output_vars.iter_mut().enumerate().take(STATE_SIZE) {
             let matrix_vec_i = matrix.vec(i);
             *output = self.create_variable(output_val.elems()[i])?;
+            let err = self.create_variable(F::zero())?;
             let wire_vars = &[
                 input_var.0[0],
                 input_var.0[1],
                 input_var.0[2],
                 input_var.0[3],
                 *output,
+                err,
             ];
             let constant_i = constant.elems()[i];
             self.insert_gate(
@@ -429,12 +431,14 @@ where
             for (i, output) in output_vars.iter_mut().enumerate().take(STATE_SIZE) {
                 let matrix_vec_i = matrix.vec(i);
                 *output = self.create_variable(output_val.elems()[i])?;
+                let err = self.create_variable(F::zero())?;
                 let wire_vars = &[
                     input_var.0[0],
                     input_var.0[1],
                     input_var.0[2],
                     input_var.0[3],
                     *output,
+                    err,
                 ];
                 let constant_i = constant.elems()[i];
                 self.insert_gate(
@@ -471,8 +475,9 @@ where
 
         let output_val = input_val.pow(F::A_INV);
         let output_var = self.create_variable(output_val)?;
+        let err = self.create_variable(F::zero())?;
         if F::A == 5 {
-            let wire_vars = &[output_var, 0, 0, 0, input_var];
+            let wire_vars = &[output_var, 0, 0, 0, input_var, err];
             self.insert_gate(wire_vars, Box::new(FifthRootGate))?;
             Ok(output_var)
         } else if F::A == 11 {

@@ -194,9 +194,11 @@ where
     let h_y_var = circuit.gen_quad_poly(&wire, &coeff, &q_mul, q_c)?;
 
     // res_x = f(y) / (xy)
-    circuit.mul_gate(endo_point_var.get_x(), xy_var, f_y_var)?;
+    let e_1 = circuit.create_variable(F::zero())?;
+    circuit.mul_gate(endo_point_var.get_x(), xy_var, f_y_var, e_1)?;
     // res_y = g(y) / h(y)
-    circuit.mul_gate(endo_point_var.get_y(), h_y_var, g_y_var)?;
+    let e_2 = circuit.create_variable(F::zero())?;
+    circuit.mul_gate(endo_point_var.get_y(), h_y_var, g_y_var, e_2)?;
 
     Ok(endo_point_var)
 }
