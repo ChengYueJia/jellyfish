@@ -374,6 +374,9 @@ where
     /// The actual values of variables.
     witness: Vec<F>,
 
+    /// u
+    u: F,
+
     /// The permutation over wires.
     /// Each relaxed algebraic gate has 6 wires, i.e., 4 input wires, an output
     /// wire, and an error wire; each lookup gate has a single wire that maps to a witness to
@@ -425,6 +428,7 @@ impl<F: FftField> PlonkCircuit<F> {
         let mut circuit = Self {
             num_vars: 2,
             witness: vec![zero, one],
+            u: one,
             gates: vec![],
             // size is `num_wire_types`
             wire_variables: [vec![], vec![], vec![], vec![], vec![], vec![], vec![]],
@@ -909,10 +913,10 @@ impl<F: FftField> PlonkCircuit<F> {
     /// Check that the `gate_id`-th gate is satisfied by the circuit's witness
     /// and the public input value `pub_input`. `gate_id` is guaranteed to
     /// be in the range. The gate equation:
-    /// qo * wo + q_e * we = pub_input + q_c +
-    ///           q_mul0 * w0 * w1 + q_mul1 * w2 * w3 +
-    ///           q_lc0 * w0 + q_lc1 * w1 + q_lc2 * w2 + q_lc3 * w3 +
-    ///           q_hash0 * w0 + q_hash1 * w1 + q_hash2 * w2 + q_hash3 * w3 +
+    /// u^4 * qo * wo + q_e * we = u^5 * pub_input + u^5 * q_c +
+    ///           u^3 * q_mul0 * w0 * w1 + u^3 * q_mul1 * w2 * w3 +
+    ///           u^4 * q_lc0 * w0 + u^4 * q_lc1 * w1 + u^4 * q_lc2 * w2 + u^4 * q_lc3 * w3 +
+    ///           q_hash0 * w0^5 + q_hash1 * w1^5 + q_hash2 * w2^5 + q_hash3 * w3^5 +
     ///           q_ecc * w0 * w1 * w2 * w3 * wo
     fn check_gate(&self, gate_id: Variable, pub_input: &F) -> Result<(), CircuitError> {
         // Compute wire values
@@ -925,25 +929,29 @@ impl<F: FftField> PlonkCircuit<F> {
         let q_mul: [F; N_MUL_SELECTORS] = self.gates[gate_id].q_mul();
         let q_hash: [F; GATE_WIDTH] = self.gates[gate_id].q_hash();
         let q_c = self.gates[gate_id].q_c();
-        let q_o = self.gates[gate_id].q_o();
+        let q_o: F = self.gates[gate_id].q_o();
         let q_e = self.gates[gate_id].q_e();
         let q_ecc = self.gates[gate_id].q_ecc();
 
+        let u_pow_5 = self.u.pow([5]);
+        let u_pow_4 = self.u.pow([4]);
+        let u_pow_3 = self.u.pow([3]);
+
         // Compute the gate output
-        let expected_gate_output = *pub_input
-            + q_lc[0] * w_vals[0]
-            + q_lc[1] * w_vals[1]
-            + q_lc[2] * w_vals[2]
-            + q_lc[3] * w_vals[3]
-            + q_mul[0] * w_vals[0] * w_vals[1]
-            + q_mul[1] * w_vals[2] * w_vals[3]
+        let expected_gate_output = *pub_input * u_pow_5
+            + q_lc[0] * w_vals[0] * u_pow_4
+            + q_lc[1] * w_vals[1] * u_pow_4
+            + q_lc[2] * w_vals[2] * u_pow_4
+            + q_lc[3] * w_vals[3] * u_pow_4
+            + q_mul[0] * w_vals[0] * w_vals[1] * u_pow_3
+            + q_mul[1] * w_vals[2] * w_vals[3] * u_pow_3
             + q_ecc * w_vals[0] * w_vals[1] * w_vals[2] * w_vals[3] * w_vals[4]
             + q_hash[0] * w_vals[0].pow([5])
             + q_hash[1] * w_vals[1].pow([5])
             + q_hash[2] * w_vals[2].pow([5])
             + q_hash[3] * w_vals[3].pow([5])
-            + q_c;
-        let gate_output = q_o * w_vals[4];
+            + q_c * u_pow_5;
+        let gate_output = q_o * w_vals[4] * u_pow_4;
         let gate_error = q_e * w_vals[5];
         if expected_gate_output != gate_output + gate_error {
             return Err(
@@ -1303,6 +1311,12 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 other.num_inputs()
             )));
         }
+        if self.u != other.u {
+            return Err(ParameterError(format!(
+                "self.u = {} different from other.u = {}",
+                self.u, other.u
+            )));
+        }
         if self.pub_input_gate_ids[0] != 0 {
             return Err(ParameterError(
                 "the first circuit is not type A".to_string(),
@@ -1361,6 +1375,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             num_vars,
             witness,
             gates,
+            u: self.u,
             wire_variables,
             pub_input_gate_ids,
             wire_permutation,
@@ -1372,12 +1387,293 @@ impl<F: PrimeField> PlonkCircuit<F> {
             table_gate_ids: vec![],
         })
     }
+
+    /// folding
+    pub fn fold(&self, other: &Self, r: F) -> Result<Self, CircuitError> {
+        // check_finalize_flag ?
+        if self.eval_domain_size()? != other.eval_domain_size()? {
+            return Err(ParameterError(format!(
+                "cannot folding circuits with different domain sizes: {}, {}",
+                self.eval_domain_size()?,
+                other.eval_domain_size()?
+            )));
+        }
+        if self.plonk_params.plonk_type != PlonkType::TurboPlonk
+            || other.plonk_params.plonk_type != PlonkType::TurboPlonk
+        {
+            return Err(ParameterError(
+                "do not support folding non-TurboPlonk circuits.".to_string(),
+            ));
+        }
+        if self.num_inputs() != other.num_inputs() {
+            return Err(ParameterError(format!(
+                "self.num_inputs = {} different from other.num_inputs = {}",
+                self.num_inputs(),
+                other.num_inputs()
+            )));
+        }
+        if self.num_gates() != other.num_gates() {
+            return Err(ParameterError(
+                "self.gates different from other.gates".to_string(),
+            ));
+        }
+
+        // check self.gates == other.gates
+        for (s, o) in self.gates.iter().zip(other.gates.iter()) {
+            if !(s.name() == o.name()
+                && s.q_lc() == o.q_lc()
+                && s.q_hash() == o.q_hash()
+                && s.q_mul() == o.q_mul()
+                && s.q_ecc() == o.q_ecc()
+                && s.q_c() == o.q_c()
+                && s.q_o() == o.q_o()
+                && s.q_e() == o.q_e())
+            {
+                return Err(ParameterError(
+                    "self.gates different from other.gates".to_string(),
+                ));
+            }
+        }
+
+        let u_1 = self.u;
+        let u_2 = other.u;
+        let u_3 = u_1 + r * u_2;
+
+        let num_gates = self.num_gates();
+
+        // new w_0/1/2/3/o = self.w_0/1/2/3/o + r * other.w_0/1/2/3/o
+        // witness[0-num_gates*5] stores the w_0/1/2/3/o
+        // witness[num_gates*5-num_gates*6] stores the error
+        let mut witness: Vec<F> = vec![];
+        let mut error3 = vec![];
+        for (i, (w1, w2)) in self.witness.iter().zip(&other.witness).enumerate() {
+            if i < num_gates * 5 {
+                witness.push(*w1 + *w2 * r);
+            } else {
+                error3.push(*w1 + *w2 * r.pow([5]))
+            }
+        }
+
+        // how to get pub_input?
+        let mut pub_input: Vec<F> = vec![];
+        for pi_gate_id in self.pub_input_gate_ids.iter() {
+            pub_input.push(self.gates[*pi_gate_id].q_o());
+        }
+
+        let mut q_ecc: Vec<F> = vec![];
+
+        let mut q_mul0: Vec<F> = vec![];
+        let mut q_mul1: Vec<F> = vec![];
+
+        let mut q_lc0: Vec<F> = vec![];
+        let mut q_lc1: Vec<F> = vec![];
+        let mut q_lc2: Vec<F> = vec![];
+        let mut q_lc3: Vec<F> = vec![];
+
+        let mut q_hash0: Vec<F> = vec![];
+        let mut q_hash1: Vec<F> = vec![];
+        let mut q_hash2: Vec<F> = vec![];
+        let mut q_hash3: Vec<F> = vec![];
+
+        let mut q_c: Vec<F> = vec![];
+        let mut q_o: Vec<F> = vec![];
+        let mut q_e: Vec<F> = vec![];
+
+        // Check rest of the gates
+        for gate_id in 0..num_gates {
+            if !self.is_io_gate(gate_id) {
+                // self.gates == others.gates, so we used the self's
+                let gate = &self.gates[gate_id];
+                q_ecc.push(gate.q_ecc());
+
+                q_mul0.push(gate.q_mul()[0]);
+                q_mul1.push(gate.q_mul()[1]);
+
+                q_lc0.push(gate.q_lc()[0]);
+                q_lc1.push(gate.q_lc()[1]);
+                q_lc2.push(gate.q_lc()[2]);
+                q_lc3.push(gate.q_lc()[3]);
+
+                q_hash0.push(gate.q_hash()[0]);
+                q_hash1.push(gate.q_hash()[1]);
+                q_hash2.push(gate.q_hash()[2]);
+                q_hash3.push(gate.q_hash()[3]);
+
+                q_c.push(gate.q_c());
+                q_o.push(gate.q_o());
+                q_e.push(gate.q_e());
+            }
+        }
+
+        let f3 = F::from(3u64);
+        let f4 = F::from(4u64);
+        let f5 = F::from(5u64);
+        let f6 = F::from(6u64);
+        let f10 = F::from(10u64);
+
+        assert_eq!(pub_input.len(), q_e.len());
+
+        // w_01[i] = self.witness[i]
+        // w_11[i] = self.witness[num_gates + i]
+        // w_21[i] = self.witness[num_gates * 2 + i]
+        // w_31[i] = self.witness[num_gates * 3 + i]
+        // w_o1[i] = self.witness[num_gates * 4 + i]
+        // w_02[i] = other.witness[i]
+        // w_12[i] = other.witness[num_gates + i]
+        // w_22[i] = other.witness[num_gates * 2 + i]
+        // w_32[i] = other.witness[num_gates * 3 + i]
+        // w_o2[i] = other.witness[num_gates * 4 + i]
+        for i in 0..q_e.len() {
+            let t_1_i = f5 * u_1.pow([4]) * u_2 * q_c[i]  // 5u_1^4 * u_2 * q_c
+                + f5 * u_1.pow([4]) * u_2 * pub_input[i] // 5u_1^4 * u_2 * pub_input
+                + f4 * u_1.pow([3]) * u_2 * q_lc0[i] * self.witness[i] // 4u_1^3 * u_2 * q_lc0 * w_01
+                + u_1.pow([4]) * q_lc0[i] * other.witness[i] // u_1^4 * q_lc0 * w_02
+                + f5 * q_hash0[i] * self.witness[i].pow([4]) * other.witness[i] // 5q_hash0 * w_01^4 * w_02
+                + f4 * u_1.pow([3]) * u_2 * q_lc1[i] * self.witness[num_gates + i] // 4u_1^3 * u_2 * q_lc1 * w_11
+                + f3 * u_1.pow([2]) * u_2 * q_mul0[i] * self.witness[i] * self.witness[num_gates + i] // 3u_1^2 * u_2 * q_mul0 * w_01 * w_11
+                + u_1.pow([3]) * q_mul0[i] * other.witness[i] * self.witness[num_gates + i] // u_1^3 * q_mul0 * w_02 * w_11
+                + u_1.pow([4]) * q_lc1[i] * other.witness[num_gates + i] // u_1^4 * q_lc1 * w_12
+                + u_1.pow([3]) * q_mul0[i] * self.witness[i] * other.witness[num_gates + i] // u_1^3 * q_mul0 * w_01 * w_12
+                + f5 * q_hash1[i] * self.witness[num_gates + i].pow([4]) * other.witness[num_gates + i] // 5q_hash1 * w_11^4 * w_12
+                + f4 * u_1.pow([3]) * u_2 * q_lc2[i] * self.witness[num_gates * 2 + i] // 4u_1^3 * u_2 * q_lc2 * w_21
+                + u_1.pow([4]) * q_lc2[i] * other.witness[num_gates * 2 + i] // u_1^4 * q_lc2 * w_22
+                + f5 * q_hash2[i] * self.witness[num_gates * 2 + i].pow([4]) * other.witness[num_gates * 2 + i] // 5q_hash2 * w_21^4 * w_22
+                + f4 * u_1.pow([3]) * u_2 * q_lc3[i] * self.witness[num_gates * 3 + i] // 4u_1^3 * u_2 * q_lc3 * w_31
+                + f3 * u_1.pow([2]) * u_2 * q_mul1[i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // 3u_1^2 * u_2 * q_mul1 * w_21 * w_31
+                + u_1.pow([3]) * q_mul1[i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // u_1^3 * q_mul1 * w_22 * w_31
+                + u_1.pow([4]) * q_lc3[i] * other.witness[num_gates * 3 + i] // u_1^4 * q_lc3 * w_32
+                + u_1.pow([3]) * q_mul1[i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // u_1^3 * q_mul1 * w_21 * w_32
+                + f5 * q_hash3[i] * self.witness[num_gates * 3 + i].pow([4]) * other.witness[num_gates * 3 + i] // 5q_hash3 * w_31^4 * w_32
+                - f4 * u_1.pow([3]) * u_2 * q_o[i] * self.witness[num_gates * 4 + i] // - 4u_1^3 * u_2 * q_o * w_o1
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_21 * w_31 * w_o1
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_21 * w_31 * w_o1
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_22 * w_31 * w_o1
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_21 * w_32 * w_o1
+                - u_1.pow([4]) * q_o[i] * other.witness[num_gates * 4 + i] // - u_1^4 * q_o * w_o2
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i]; // q_ecc * w_01 * w_11 * w_21 * w_31 * w_o2
+
+            let t_2_i = f10 * u_1.pow([3]) * u_2.pow([2]) * q_c[i] // 10u_1^3 * u_2^2 * q_c
+                + f10 * u_1.pow([3]) * u_2.pow([2]) * pub_input[i] // 10u_1^3 * u_2^2 * pub_input
+                + f6 * u_1.pow([2]) * u_2 * q_lc0[i] * self.witness[i] // 6u_1^2 * u_2 * q_lc0 * w_01
+                + f4 * u_1.pow([3]) * u_2 * q_lc0[i] * other.witness[i] // 4u_1^3 * u_2 * q_lc0 * w_02
+                + f10 * q_hash0[i] * self.witness[i].pow([3]) * other.witness[i].pow([2]) // 10q_hash0 * w_01^3 * w_02^2
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc1[i] * self.witness[num_gates + i] // 6u_1^2 * u_2^2 * q_lc1 * w_11
+                + f3 * u_1 * u_2.pow([2]) * q_mul0[i] * self.witness[i] * self.witness[num_gates + i] // 3u_1 * u_2^2 * q_mul0 * w_01 * w_11
+                + f3 * u_1.pow([2]) * u_2 * q_mul0[i] * other.witness[i] * self.witness[num_gates + i] // 3u_1^2 * u_2 * q_mul0 * w_02 * w_11
+                + f4 * u_1.pow([3]) * u_2 * q_lc1[i] * other.witness[num_gates + i] // 4u_1^3 * u_2 * q_lc1 * w_12
+                + f3 * u_1.pow([2]) * u_2 * q_mul0[i] * self.witness[i] * other.witness[num_gates + i] // 3u_1^2 * u_2 * q_mul0 * w_01 * w_12
+                + u_1.pow([3]) * q_mul0[i] * other.witness[i] * other.witness[num_gates + i] // u_1^3 * q_mul0 * w_02 * w_12
+                + f10 * q_hash1[i] * self.witness[num_gates + i].pow([3]) * other.witness[num_gates + i].pow([2]) // 10q_hash1 * w_11^3 * w_12^2
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc2[i] * self.witness[num_gates * 2 + i] // 6u_1^2 * u_2^2 * q_lc2 * w_21
+                + f4 * u_1.pow([3]) * u_2 * q_lc2[i] * other.witness[num_gates * 2 + i] // 4u_1^3 * u_2 * q_lc2 * w_22
+                + f10 * q_hash2[i] * self.witness[num_gates * 2 + i].pow([3]) * other.witness[num_gates * 2 + i].pow([2]) // 10q_hash2 * w_21^3 * w_22^2
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc3[i] * self.witness[num_gates * 3 + i] // 6u_1^2 * u_2^2 * q_lc3 * w_31
+                + f3 * u_1 * u_2.pow([2]) * q_mul1[i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // 3u_1 * u_2^2 * q_mul1 * w_21 * w_31
+                + f3 * u_1.pow([2]) * u_2 * q_mul1[i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // 3u_1^2 * u_2 * q_mul1 * w_22 * w_31
+                + f4 * u_1.pow([3]) * u_2 * q_lc3[i] * other.witness[num_gates * 3 + i] // 4u_1^3 * u_2 * q_lc3 * w_32
+                + f3 * u_1.pow([2]) * u_2 * q_mul1[i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // 3u_1^2 * u_2 * q_mul1 * w_21 * w_32
+                + u_1.pow([3]) * q_mul1[i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // u_1^3 * q_mul1 * w_22 * w_32
+                + f10 * q_hash3[i] * self.witness[num_gates * 3 + i].pow([3]) * other.witness[num_gates * 3 + i].pow([2]) // 10q_hash3 * w_31^3 * w_32^2
+                - f6 * u_1.pow([2]) * u_2.pow([2]) * q_o[i] * self.witness[num_gates * 4 + i] // - 6u_1^2 * u_2^2 * q_o * w_o1
+                + q_ecc[i] * other.witness[i]* other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_21 * w_31 * w_o1
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_22 * w_31 * w_o1
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_22 * w_31 * w_o1
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_21 * w_32 * w_o1
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_21 * w_32 * w_o1
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_22 * w_32 * w_o1
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_21 * w_31 * w_o2
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_21 * w_31 * w_o2
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_22 * w_31 * w_o2
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_21 * w_32 * w_o2
+                - f4 * u_1.pow([3]) * u_2 * q_o[i] * other.witness[num_gates * 4 + i]; // - 4u_1^3 * u_2 * q_o * w_o2
+
+            let t_3_i = f10 * u_1.pow([2]) * u_2.pow([3]) * q_c[i] // 10u_1^2 * u_2^3 * q_c
+                + f10 * u_1.pow([2]) * u_2.pow([3]) * pub_input[i] // 10u_1^2 * u_2^3 * pub_input
+                + f4 * u_1 * u_2.pow([3]) * q_lc0[i] * self.witness[i] // 4u_1 * u_2^3 * q_lc0 * w_01
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc0[i] * other.witness[i] // 6u_1^2 * u_2^2 * q_lc0 * w_02
+                + f10 * q_hash0[i] * self.witness[i].pow([2]) * other.witness[i].pow([3]) // 10q_hash0 * w_01^2 * w_02^3
+                + f4 * u_1 * u_2.pow([3]) * q_lc1[i] * self.witness[num_gates + i] // 4u_1 * u_2^3 * q_lc1 * w_11
+                + u_2.pow([3]) * q_mul0[i] * self.witness[i] * self.witness[num_gates + i] // u_2^3 * q_mul0 * w_01 * w_11
+                + f3 * u_1 * u_2.pow([2]) * q_mul0[i] * other.witness[i] * self.witness[num_gates + i] // 3u_1 * u_2^2 * q_mul0 * w_02 * w_11
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc1[i] * other.witness[num_gates + i] // 6u_1^2 * u_2^2 * q_lc1 * w_12
+                + f3 * u_1 * u_2.pow([2]) * q_mul0[i] * self.witness[i] * other.witness[num_gates + i] // 3u_1 * u_2^2 * q_mul0 * w_01 * w_12
+                + f3 * u_1.pow([2]) * u_2 * q_mul0[i] * other.witness[i] * other.witness[num_gates + i] // 3u_1^2 * u_2 * q_mul0 * w_02 * w_12
+                + f10 * q_hash1[i] * self.witness[num_gates + i].pow([2]) * other.witness[num_gates + i].pow([3]) // 10q_hash1 * w_11^2 * w_12^3
+                + f4 * u_1 * u_2.pow([3]) * q_lc2[i] * self.witness[num_gates * 2 + i] // 4u_1 * u_2^3 * q_lc2 * w_21
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc2[i] * other.witness[num_gates * 2 + i] // 6u_1^2 * u_2^2 * q_lc2 * w_22
+                + f10 * q_hash2[i] * self.witness[num_gates * 2 + i].pow([2]) * other.witness[num_gates * 2 + i].pow([3]) // 10q_hash2 * w_21^2 * w_22^3
+                + f4 * u_1 * u_2.pow([3]) * q_lc3[i] * self.witness[num_gates * 3 + i] // 4u_1 * u_2^3 * q_lc3 * w_31
+                + u_2.pow([3]) * q_mul1[i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // u_2^3 * q_mul1 * w_21 * w_31
+                + f3 * u_1 * u_2.pow([2]) * q_mul1[i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // 3u_1 * u_2^2 * q_mul1 * w_22 * w_31
+                + f6 * u_1.pow([2]) * u_2.pow([2]) * q_lc3[i] * other.witness[num_gates * 3 + i] // 6u_1^2 * u_2^2 * q_lc3 * w_32
+                + f3 * u_1 * u_2.pow([2]) * q_mul1[i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // 3u_1 * u_2^2 * q_mul1 * w_21 * w_32
+                + f3 * u_1.pow([2]) * u_2 * q_mul1[i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // 3u_1^2 * u_2 * q_mul1 * w_22 * w_32
+                + f10 * q_hash3[i] * self.witness[num_gates * 3 + i].pow([2]) * other.witness[num_gates * 3 + i].pow([3]) // 10q_hash3 * w_31^2 * w_32^3
+                - f4 * u_1 * u_2.pow([3]) * q_o[i] * self.witness[num_gates * 4 + i] // - 4u_1 * u_2^3 * q_o * w_o1
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_22 * w_31 * w_o1
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_21 * w_32 * w_o1
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_22 * w_32 * w_o1
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_22 * w_32 * w_o1
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_21 * w_31 * w_o2
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_22 * w_31 * w_o2
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_22 * w_31 * w_o2
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_21 * w_32 * w_o2
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_21 * w_32 * w_o2
+                + q_ecc[i] * self.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_11 * w_22 * w_32 * w_o2
+                - f6 * u_1.pow([2]) * u_2.pow([2]) * q_o[i] * other.witness[num_gates * 4 + i]; // - 6u_1^2 * u_2^2 * q_o * w_o2
+
+            let t_4_i = f5 * u_1* u_2.pow([4]) * q_c[i] // 5u_1 * u_2^4 * q_c
+                + f5 * u_1* u_2.pow([4]) * pub_input[i] // 5u_1 * u_2^4 * pub_input
+                + u_2.pow([4]) * q_lc0[i] * self.witness[i] // u_2^4 * q_lc0 * w_01
+                + f4 * u_1 * u_2.pow([3]) * q_lc0[i] * other.witness[i] // 4u_1 * u_2^3 * q_lc0 * w_02
+                + f5 * q_hash0[i] * self.witness[i] * other.witness[i].pow([4]) // 5q_hash0 * w_01 * w_02^4
+                + u_2.pow([4]) * q_lc1[i] * self.witness[num_gates + i] // u_2^4 * q_lc1 * w_11
+                + u_2.pow([3]) * q_mul0[i] * other.witness[i] * self.witness[num_gates + i] // u_2^3 * q_mul0 * w_02 * w_11
+                + f4 * u_1 * u_2.pow([3]) * q_lc1[i] * other.witness[num_gates + i] // 4u_1 * u_2^3 * q_lc1 * w_12
+                + u_2.pow([3]) * q_mul0[i] * self.witness[i] * other.witness[num_gates + i] // u_2^3 * q_mul0 * w_01 * w_12
+                + f3 * u_1 * u_2.pow([2]) * q_mul0[i] * other.witness[i] * other.witness[num_gates + i] // 3u_1 * u_2^2 * q_mul0 * w_02 * w_12
+                + f5 * q_hash1[i] * self.witness[num_gates + i] * other.witness[num_gates + i].pow([4]) // 5q_hash1 * w_11 * w_12^4
+                + u_2.pow([4]) * q_lc2[i] * self.witness[num_gates * 2 + i] // u_2^4 * q_lc2 * w_21
+                + f4 * u_1 * u_2.pow([3]) * q_lc2[i] * other.witness[num_gates * 2 + i] // 4u_1 * u_2^3 * q_lc2 * w_22
+                + f5 * q_hash2[i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 2 + i].pow([4]) // 5q_hash2 * w_21 * w_22^4
+                + u_2.pow([4]) * q_lc3[i] * self.witness[num_gates * 3 + i] // u_2^4 * q_lc3 * w_31
+                + u_2.pow([3]) * q_mul1[i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] // u_2^3 * q_mul1 * w_22 * w_31
+                + f4 * u_1 * u_2.pow([3]) * q_lc3[i] * other.witness[num_gates * 3 + i] // 4u_1 * u_2^3 * q_lc3 * w_32
+                + u_2.pow([3]) * q_mul1[i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // u_2^3 * q_mul1 * w_21 * w_32
+                + f3 * u_1 * u_2.pow([2]) * q_mul1[i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] // 3u_1 * u_2^2 * q_mul1 * w_22 * w_32
+                + f5 * q_hash3[i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 3 + i].pow([4]) // 5q_hash3 * w_31 * w_32^4
+                - u_2.pow([4]) * q_o[i] * self.witness[num_gates * 4 + i] // - u_2^4 * q_o * w_o1
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * self.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_22 * w_32 * w_o1
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * self.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_22 * w_31 * w_o2
+                + q_ecc[i] * other.witness[i] * other.witness[num_gates + i] * self.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_12 * w_21 * w_32 * w_o2
+                + q_ecc[i] * other.witness[i] * self.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_02 * w_11 * w_22 * w_32 * w_o2
+                + q_ecc[i] * self.witness[i] * other.witness[num_gates + i] * other.witness[num_gates * 2 + i] * other.witness[num_gates * 3 + i] * other.witness[num_gates * 4 + i] // q_ecc * w_01 * w_12 * w_22 * w_32 * w_o2
+                - f4 * u_1 * u_2.pow([3]) * q_o[i] * other.witness[num_gates * 4 + i]; // - 4u_1 * u_2^3 * q_o * w_o2
+
+            error3[i] += t_1_i * r + t_2_i * r.pow([2]) + t_3_i * r.pow([3]) + t_4_i * r.pow([4]);
+        }
+
+        witness.extend_from_slice(&error3);
+
+        Ok(Self {
+            num_vars: self.num_vars,
+            witness,
+            gates: self.gates.clone(),
+            u: u_3,
+            wire_variables: self.wire_variables.clone(),
+            pub_input_gate_ids: self.pub_input_gate_ids.clone(),
+            wire_permutation: self.wire_permutation.clone(),
+            extended_id_permutation: self.extended_id_permutation.clone(),
+            num_wire_types: self.num_wire_types,
+            eval_domain: self.eval_domain,
+            plonk_params: self.plonk_params,
+            num_table_elems: self.num_table_elems,
+            table_gate_ids: self.table_gate_ids.clone(),
+        })
+    }
 }
 
-impl<F> Arithmetization<F> for PlonkCircuit<F>
-where
-    F: PrimeField,
-{
+impl<F: PrimeField> Arithmetization<F> for PlonkCircuit<F> {
     fn srs_size(&self) -> Result<usize, CircuitError> {
         // extra 2 degree for masking polynomial to make snark zero-knowledge
         Ok(self.eval_domain_size()? + 2)
