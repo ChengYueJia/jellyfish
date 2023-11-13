@@ -913,7 +913,8 @@ impl<F: FftField> PlonkCircuit<F> {
     /// Check that the `gate_id`-th gate is satisfied by the circuit's witness
     /// and the public input value `pub_input`. `gate_id` is guaranteed to
     /// be in the range. The gate equation:
-    /// u^4 * qo * wo + q_e * we = pub_input + u^5 * q_c +
+    /// qo * wo = pub_input &&
+    /// u^4 * qo * wo + q_e * we = u^5 * q_c +
     ///           u^3 * q_mul0 * w0 * w1 + u^3 * q_mul1 * w2 * w3 +
     ///           u^4 * q_lc0 * w0 + u^4 * q_lc1 * w1 + u^4 * q_lc2 * w2 + u^4 * q_lc3 * w3 +
     ///           q_hash0 * w0^5 + q_hash1 * w1^5 + q_hash2 * w2^5 + q_hash3 * w3^5 +
@@ -1463,13 +1464,13 @@ impl<F: PrimeField> PlonkCircuit<F> {
             for w_i in 0..(GATE_WIDTH + 1) {
                 witness[self.wire_variables[w_i][gate_id]] = self.witness
                     [self.wire_variables[w_i][gate_id]]
-                    + other.witness[self.wire_variables[w_i][gate_id]] * r;
+                    + other.witness[other.wire_variables[w_i][gate_id]] * r;
             }
 
             // w_e = w_e1 + r^5 * w_e2 + ...
             witness[self.wire_variables[5][gate_id]] = self.witness
                 [self.wire_variables[5][gate_id]]
-                + other.witness[self.wire_variables[5][gate_id]] * r.pow([5]);
+                + other.witness[other.wire_variables[5][gate_id]] * r.pow([5]);
             // w_r = w_r
             witness[self.wire_variables[6][gate_id]] = self.witness[self.wire_variables[6][gate_id]]
         }
