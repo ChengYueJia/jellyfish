@@ -188,7 +188,8 @@ impl<E: Pairing> Prover<E> {
     ) -> Result<CommitmentsAndPolys<E>, PlonkError> {
         let quot_poly =
             self.compute_quotient_polynomial(challenges, pks, online_oracles, num_wire_types)?;
-        let split_quot_polys = self.split_quotient_polynomial(prng, &quot_poly, num_wire_types)?;
+        let split_quot_polys =
+            self.split_quotient_polynomial(prng, &quot_poly, num_wire_types - 1)?;
         let split_quot_poly_comms: Vec<Commitment<E>> =
             UnivariateKzgPCS::batch_commit(ck, &split_quot_polys)?;
 
@@ -531,6 +532,9 @@ impl<E: Pairing> Prover<E> {
             // lookup_flag = 1 if support Plookup argument.
             let lookup_flag = pk.plookup_pk.is_some();
 
+            // slack variable
+            let mu = oracles.mu;
+
             // Compute coset evaluations.
             let selectors_coset_fft: Vec<Vec<E::ScalarField>> =
                 parallelizable_slice_iter(&pk.selectors)
@@ -597,6 +601,7 @@ impl<E: Pairing> Prover<E> {
 
                         let t_circ = Self::compute_quotient_circuit_contribution(
                             i,
+                            mu,
                             &w,
                             &pub_input_poly_coset_fft[i],
                             &selectors_coset_fft,
@@ -665,12 +670,13 @@ impl<E: Pairing> Prover<E> {
     // polynomial.
     fn compute_quotient_circuit_contribution(
         i: usize,
+        mu: E::ScalarField,
         w: &[E::ScalarField],
         pi: &E::ScalarField,
         selectors_coset_fft: &[Vec<E::ScalarField>],
     ) -> E::ScalarField {
         // Selectors
-        // The order: q_lc, q_mul, q_hash, q_o, q_c, q_ecc
+        // The order: q_lc, q_mul, q_hash, q_o, q_e, q_c, q_ecc
         // TODO: (binyi) get the order from a function.
         let q_lc: Vec<E::ScalarField> =
             (0..GATE_WIDTH).map(|j| selectors_coset_fft[j][i]).collect();
@@ -681,22 +687,29 @@ impl<E: Pairing> Prover<E> {
             .map(|j| selectors_coset_fft[j][i])
             .collect();
         let q_o = selectors_coset_fft[2 * GATE_WIDTH + 2][i];
-        let q_c = selectors_coset_fft[2 * GATE_WIDTH + 3][i];
-        let q_ecc = selectors_coset_fft[2 * GATE_WIDTH + 4][i];
+        let q_e = selectors_coset_fft[2 * GATE_WIDTH + 3][i];
+        let q_c = selectors_coset_fft[2 * GATE_WIDTH + 4][i];
+        let q_ecc = selectors_coset_fft[2 * GATE_WIDTH + 5][i];
 
-        q_c + pi
-            + q_lc[0] * w[0]
-            + q_lc[1] * w[1]
-            + q_lc[2] * w[2]
-            + q_lc[3] * w[3]
-            + q_mul[0] * w[0] * w[1]
-            + q_mul[1] * w[2] * w[3]
+        let u_pow_5 = mu.pow([5]);
+        let u_pow_4 = mu.pow([4]);
+        let u_pow_3 = mu.pow([3]);
+
+        q_c * u_pow_5
+            + (*pi) * u_pow_5
+            + q_lc[0] * w[0] * u_pow_4
+            + q_lc[1] * w[1] * u_pow_4
+            + q_lc[2] * w[2] * u_pow_4
+            + q_lc[3] * w[3] * u_pow_4
+            + q_mul[0] * w[0] * w[1] * u_pow_3
+            + q_mul[1] * w[2] * w[3] * u_pow_3
             + q_ecc * w[0] * w[1] * w[2] * w[3] * w[4]
             + q_hash[0] * w[0].pow([5])
             + q_hash[1] * w[1].pow([5])
             + q_hash[2] * w[2].pow([5])
             + q_hash[3] * w[3].pow([5])
-            - q_o * w[4]
+            - q_o * w[4] * u_pow_4
+            - q_e * w[5]
     }
 
     /// Compute the i-th coset evaluation of the copy constraint part of the
@@ -727,18 +740,22 @@ impl<E: Pairing> Prover<E> {
         // Delay the division of Z_H(X).
         //
         // Extended permutation values
-        let sigmas: Vec<E::ScalarField> = (0..num_wire_types)
+        let sigmas: Vec<E::ScalarField> = (0..(num_wire_types - 1))
             .map(|j| sigmas_coset_fft[j][i])
             .collect();
 
         // Compute the 1st term.
         let mut result_1 = challenges.alpha
-            * w.iter().enumerate().fold(*z_x, |acc, (j, &w)| {
-                acc * (w + pk.k()[j] * eval_point * challenges.beta + challenges.gamma)
-            });
+            * w.iter()
+                .take(num_wire_types - 1)
+                .enumerate()
+                .fold(*z_x, |acc, (j, &w)| {
+                    acc * (w + pk.k()[j] * eval_point * challenges.beta + challenges.gamma)
+                });
         // Minus the 2nd term.
         result_1 -= challenges.alpha
             * w.iter()
+                .take(num_wire_types - 1)
                 .zip(sigmas.iter())
                 .fold(*z_xw, |acc, (&w, &sigma)| {
                     acc * (w + sigma * challenges.beta + challenges.gamma)

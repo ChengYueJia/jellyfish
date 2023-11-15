@@ -72,6 +72,9 @@ pub enum MergeableCircuitType {
 
 /// An interface for Plonk constraint systems.
 pub trait Circuit<F: Field> {
+    /// The slack variable
+    fn mu(&self) -> F;
+
     /// The number of constraints.
     fn num_gates(&self) -> usize;
 
@@ -374,8 +377,8 @@ where
     /// The actual values of variables.
     witness: Vec<F>,
 
-    /// u
-    u: F,
+    /// slack variable
+    mu: F,
 
     /// The permutation over wires.
     /// Each relaxed algebraic gate has 6 wires, i.e., 4 input wires, an output
@@ -428,7 +431,7 @@ impl<F: FftField> PlonkCircuit<F> {
         let mut circuit = Self {
             num_vars: 2,
             witness: vec![zero, one],
-            u: one,
+            mu: one,
             gates: vec![],
             // size is `num_wire_types`
             wire_variables: [vec![], vec![], vec![], vec![], vec![], vec![], vec![]],
@@ -574,6 +577,10 @@ impl<F: FftField> PlonkCircuit<F> {
 }
 
 impl<F: FftField> Circuit<F> for PlonkCircuit<F> {
+    fn mu(&self) -> F {
+        self.mu
+    }
+
     fn num_gates(&self) -> usize {
         self.gates.len()
     }
@@ -934,9 +941,9 @@ impl<F: FftField> PlonkCircuit<F> {
         let q_e = self.gates[gate_id].q_e();
         let q_ecc = self.gates[gate_id].q_ecc();
 
-        let u_pow_5 = self.u.pow([5]);
-        let u_pow_4 = self.u.pow([4]);
-        let u_pow_3 = self.u.pow([3]);
+        let u_pow_5 = self.mu.pow([5]);
+        let u_pow_4 = self.mu.pow([4]);
+        let u_pow_3 = self.mu.pow([3]);
 
         // Compute the gate output
         let expected_gate_output = *pub_input
@@ -985,6 +992,7 @@ impl<F: FftField> PlonkCircuit<F> {
         let m = self.num_vars();
 
         // Compute the mapping from variables to wires.
+        // !!! Error term will not participate wire permutation, since it's a special witness column/vector
         // NOTE: we can use a vector as a map because our variable (the intended "key"
         // value type of the Map) is sorted and match exactly as the
         // non-negative integer ranged from 0 to m. Our current implementation should be
@@ -994,7 +1002,7 @@ impl<F: FftField> PlonkCircuit<F> {
         for (gate_wire_id, variables) in self
             .wire_variables
             .iter()
-            .take(self.num_wire_types())
+            .take(self.num_wire_types() - 1)
             .enumerate()
         {
             for (gate_id, &var) in variables.iter().enumerate() {
@@ -1003,7 +1011,7 @@ impl<F: FftField> PlonkCircuit<F> {
         }
 
         // Compute the wire permutation
-        self.wire_permutation = vec![(0usize, 0usize); self.num_wire_types * n];
+        self.wire_permutation = vec![(0usize, 0usize); (self.num_wire_types - 1) * n];
         for wires_vec in variable_wires_map.iter_mut() {
             // The list of wires that map to the same variable forms a cycle.
             if !wires_vec.is_empty() {
@@ -1164,11 +1172,11 @@ impl<F: PrimeField> PlonkCircuit<F> {
 
         // Compute the extended identity permutation
         // id[i*n+j] = k[i] * g^j
-        let k: Vec<F> = compute_coset_representatives(self.num_wire_types, Some(n));
+        let k: Vec<F> = compute_coset_representatives(self.num_wire_types - 1, Some(n));
         // Precompute domain elements
         let group_elems: Vec<F> = self.eval_domain.elements().collect();
         // Compute extended identity permutation
-        self.extended_id_permutation = vec![F::zero(); self.num_wire_types * n];
+        self.extended_id_permutation = vec![F::zero(); (self.num_wire_types - 1) * n];
         for (i, &coset_repr) in k.iter().enumerate() {
             for (j, &group_elem) in group_elems.iter().enumerate() {
                 self.extended_id_permutation[i * n + j] = coset_repr * group_elem;
@@ -1188,14 +1196,14 @@ impl<F: PrimeField> PlonkCircuit<F> {
             .iter()
             .map(|&(wire_id, gate_id)| {
                 // if permutation value undefined, return 0
-                if wire_id >= self.num_wire_types {
+                if wire_id >= (self.num_wire_types - 1) {
                     F::zero()
                 } else {
                     self.extended_id_permutation[wire_id * n + gate_id]
                 }
             })
             .collect();
-        if extended_perm.len() != self.num_wire_types * n {
+        if extended_perm.len() != (self.num_wire_types - 1) * n {
             return Err(ParameterError(
                 "Length of the extended permutation vector should be number of gate \
                          (including padded dummy gates) * number of wire types"
@@ -1316,10 +1324,10 @@ impl<F: PrimeField> PlonkCircuit<F> {
                 other.num_inputs()
             )));
         }
-        if self.u != other.u {
+        if self.mu != other.mu {
             return Err(ParameterError(format!(
                 "self.u = {} different from other.u = {}",
-                self.u, other.u
+                self.mu, other.mu
             )));
         }
         if self.pub_input_gate_ids[0] != 0 {
@@ -1380,7 +1388,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             num_vars,
             witness,
             gates,
-            u: self.u,
+            mu: self.mu,
             wire_variables,
             pub_input_gate_ids,
             wire_permutation,
@@ -1453,8 +1461,8 @@ impl<F: PrimeField> PlonkCircuit<F> {
             }
         }
 
-        let u_1 = self.u;
-        let u_2 = other.u;
+        let u_1 = self.mu;
+        let u_2 = other.mu;
         let u_3 = u_1 + r * u_2;
 
         let mut witness = vec![F::zero(); self.witness.len()];
@@ -1672,7 +1680,7 @@ impl<F: PrimeField> PlonkCircuit<F> {
             num_vars: self.num_vars,
             witness,
             gates: self.gates.clone(),
-            u: u_3,
+            mu: u_3,
             wire_variables: self.wire_variables.clone(),
             pub_input_gate_ids: self.pub_input_gate_ids.clone(),
             wire_permutation: self.wire_permutation.clone(),
@@ -1721,7 +1729,7 @@ impl<F: PrimeField> Arithmetization<F> for PlonkCircuit<F> {
         let extended_perm = self.compute_extended_permutation()?;
 
         let extended_perm_polys: Vec<DensePolynomial<F>> =
-            parallelizable_slice_iter(&(0..self.num_wire_types).collect::<Vec<_>>()) // current par_utils only support slice iterator, not range iterator.
+            parallelizable_slice_iter(&(0..(self.num_wire_types - 1)).collect::<Vec<_>>()) // current par_utils only support slice iterator, not range iterator.
                 .map(|i| {
                     DensePolynomial::from_coefficients_vec(
                         domain.ifft(&extended_perm[i * n..(i + 1) * n]),
@@ -1746,7 +1754,8 @@ impl<F: PrimeField> Arithmetization<F> for PlonkCircuit<F> {
             let mut a = F::one();
             // Denominator
             let mut b = F::one();
-            for i in 0..self.num_wire_types {
+            // the error term should be excluded
+            for i in 0..(self.num_wire_types - 1) {
                 let wire_value = self.witness[self.wire_variable(i, j)];
                 let tmp = wire_value + gamma;
                 a *= tmp + *beta * self.extended_id_permutation[i * n + j];

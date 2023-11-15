@@ -243,11 +243,17 @@ where
         // Initialize verifier challenges and online polynomial oracles.
         let mut challenges = Challenges::default();
         let mut online_oracles = vec![Oracles::default(); circuits.len()];
-        let prover = Prover::new(n, num_wire_types)?;
+        // num_wire_types only for the purpose of quotient domain
+        let prover = Prover::new(n, num_wire_types - 1)?;
+        for i in 0..circuits.len() {
+            online_oracles[i].mu = circuits[i].mu();
+        }
 
         // Round 1
         let mut wires_poly_comms_vec = vec![];
         for i in 0..circuits.len() {
+            // wire polynomials including the error item polynomial
+            // public input polynomial is deducted through public io gate ids
             let ((wires_poly_comms, wire_polys), pi_poly) =
                 prover.run_1st_round(prng, &prove_keys[i].commit_key, circuits[i])?;
             online_oracles[i].wire_polys = wire_polys;

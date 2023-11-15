@@ -855,6 +855,7 @@ pub(crate) struct Oracles<F: FftField> {
     pub(crate) pub_inp_poly: DensePolynomial<F>,
     pub(crate) prod_perm_poly: DensePolynomial<F>,
     pub(crate) plookup_oracles: PlookupOracles<F>,
+    pub(crate) mu: F,
 }
 
 /// Plookup IOP online polynomial oracles.
