@@ -505,6 +505,7 @@ where
         let domain_size = circuit.eval_domain_size()?;
         let srs_size = circuit.srs_size()?;
         let num_inputs = circuit.num_inputs();
+        let mu = circuit.mu();
         if srs.max_degree() < circuit.srs_size()? {
             return Err(PlonkError::IndexTooLarge);
         }
@@ -569,7 +570,8 @@ where
             num_inputs,
             selector_comms,
             sigma_comms,
-            k: compute_coset_representatives(circuit.num_wire_types(), Some(domain_size)),
+            k: compute_coset_representatives(circuit.num_wire_types() - 1, Some(domain_size)),
+            mu: Some(mu),
             open_key,
             plookup_vk,
             is_merged: false,
@@ -727,7 +729,8 @@ pub mod test {
         cs.enforce_equal(acc, b_mul)?;
         let b1_plus_a0 = cs.add(b[1], a[0])?;
         let b1_minus_a0 = cs.sub(b[1], a[0])?;
-        cs.mul_gate(b1_plus_a0, b1_minus_a0, c)?;
+        let err = cs.create_variable(F::zero())?;
+        cs.mul_gate(b1_plus_a0, b1_minus_a0, c, err)?;
         cs.enforce_constant(b[0], F::from(m as u64 * 2))?;
 
         if plonk_type == PlonkType::UltraPlonk {
@@ -1760,7 +1763,8 @@ pub mod test {
         cs.enforce_equal(acc, b_mul)?;
         let b1_plus_a0 = cs.add(b[1], a[0])?;
         let b1_minus_a0 = cs.sub(b[1], a[0])?;
-        cs.mul_gate(b1_plus_a0, b1_minus_a0, c)?;
+        let err = cs.create_variable(F::zero())?;
+        cs.mul_gate(b1_plus_a0, b1_minus_a0, c, err)?;
         cs.enforce_constant(b[0], F::from(m as u64 * 2))?;
 
         cs.finalize_for_mergeable_circuit(circuit_type)?;

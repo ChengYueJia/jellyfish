@@ -388,13 +388,14 @@ where
             let mut tmp = self.evaluate_pi_poly(pi, &challenges.zeta, vanish_eval, vk.is_merged)?
                 - alpha_powers[0] * lagrange_1_eval;
             let num_wire_types = GATE_WIDTH
-                + 1
+                + 2
                 + match plookup_proof.is_some() {
                     true => 1,
                     false => 0,
                 };
-            let first_w_evals = &poly_evals.wires_evals[..num_wire_types - 1];
-            let last_w_eval = &poly_evals.wires_evals[num_wire_types - 1];
+            // need to exclude the error wire poly
+            let first_w_evals = &poly_evals.wires_evals[..num_wire_types - 2];
+            let last_w_eval = &poly_evals.wires_evals[num_wire_types - 2];
             let sigma_evals = &poly_evals.wire_sigma_evals[..];
             tmp -= first_w_evals.iter().zip(sigma_evals.iter()).fold(
                 challenges.alpha * poly_evals.perm_next_eval * (challenges.gamma + last_w_eval),
@@ -485,7 +486,7 @@ where
             }
             // Add wire sigma polynomial commitments. The last sigma commitment is excluded.
             let num_wire_types = batch_proof.wires_poly_comms_vec[i].len();
-            for &poly_comm in vk.sigma_comms.iter().take(num_wire_types - 1) {
+            for &poly_comm in vk.sigma_comms.iter().take(num_wire_types - 2) {
                 buffer_v_and_uv_basis.push(v_base);
                 Self::add_poly_comm(
                     &mut scalars_and_bases,
@@ -569,9 +570,11 @@ where
             //       * (beta * k2 * zeta + c_bar + gamma)
             // where a_bar, b_bar and c_bar are in w_evals
             let mut coeff = alpha_powers[0] * lagrange_1_eval;
+            let num_wire_types = batch_proof.wires_poly_comms_vec[i].len();
             let w_evals = &batch_proof.poly_evals_vec[i].wires_evals;
             coeff += w_evals
                 .iter()
+                .take(num_wire_types - 1)
                 .zip(vk.k.iter())
                 .fold(challenges.alpha, |acc, (w_eval, k)| {
                     acc * (challenges.beta * k * challenges.zeta + challenges.gamma + w_eval)
@@ -581,11 +584,10 @@ where
             scalars_and_bases.push(coeff, batch_proof.prod_perm_poly_comms_vec[i].0);
 
             // Compute coefficient for the last wire sigma polynomial commitment.
-            let num_wire_types = batch_proof.wires_poly_comms_vec[i].len();
             let sigma_evals = &batch_proof.poly_evals_vec[i].wire_sigma_evals;
             let coeff = w_evals
                 .iter()
-                .take(num_wire_types - 1)
+                .take(num_wire_types - 2)
                 .zip(sigma_evals.iter())
                 .fold(
                     challenges.alpha
@@ -604,22 +606,33 @@ where
 
             // Add selector polynomial commitments.
             // Compute coefficients for selector polynomial commitments.
-            // The order: q_lc, q_mul, q_hash, q_o, q_c, q_ecc
+            // The order: q_lc, q_mul, q_hash, q_o, q_e, q_c, q_ecc
             // TODO(binyi): get the order from a function.
-            let mut q_scalars = [E::ScalarField::zero(); 2 * GATE_WIDTH + 5];
-            q_scalars[0] = w_evals[0];
-            q_scalars[1] = w_evals[1];
-            q_scalars[2] = w_evals[2];
-            q_scalars[3] = w_evals[3];
-            q_scalars[4] = w_evals[0] * w_evals[1];
-            q_scalars[5] = w_evals[2] * w_evals[3];
+            let mut q_scalars = [E::ScalarField::zero(); 2 * GATE_WIDTH + 6];
+            let mu_pow_5 = vk.mu.unwrap().pow([5]);
+            let mu_pow_4 = vk.mu.unwrap().pow([4]);
+            let mu_pow_3 = vk.mu.unwrap().pow([3]);
+            // for q_lc
+            q_scalars[0] = w_evals[0] * mu_pow_4;
+            q_scalars[1] = w_evals[1] * mu_pow_4;
+            q_scalars[2] = w_evals[2] * mu_pow_4;
+            q_scalars[3] = w_evals[3] * mu_pow_4;
+            // for q_mul
+            q_scalars[4] = w_evals[0] * w_evals[1] * mu_pow_3;
+            q_scalars[5] = w_evals[2] * w_evals[3] * mu_pow_3;
+            // for q_hash
             q_scalars[6] = w_evals[0].pow([5]);
             q_scalars[7] = w_evals[1].pow([5]);
             q_scalars[8] = w_evals[2].pow([5]);
             q_scalars[9] = w_evals[3].pow([5]);
-            q_scalars[10] = -w_evals[4];
-            q_scalars[11] = E::ScalarField::one();
-            q_scalars[12] = w_evals[0] * w_evals[1] * w_evals[2] * w_evals[3] * w_evals[4];
+            // for q_o
+            q_scalars[10] = -w_evals[4] * mu_pow_5;
+            // for q_e
+            q_scalars[11] = -w_evals[5];
+            // for q_c
+            q_scalars[12] = E::ScalarField::one() * mu_pow_5;
+            // for q_ecc
+            q_scalars[13] = w_evals[0] * w_evals[1] * w_evals[2] * w_evals[3] * w_evals[4];
             for (&s, poly) in q_scalars.iter().zip(vk.selector_comms.iter()) {
                 scalars_and_bases.push(s * current_alpha_bases, poly.0);
             }

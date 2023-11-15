@@ -670,6 +670,9 @@ pub struct VerifyingKey<E: Pairing> {
     /// disjoint.
     pub(crate) k: Vec<E::ScalarField>,
 
+    /// slack variable
+    pub(crate) mu: Option<E::ScalarField>,
+
     /// KZG PCS opening key.
     pub open_key: OpenKey<E>,
 
@@ -764,13 +767,14 @@ impl<E: Pairing> VerifyingKey<E> {
     /// Create a dummy TurboPlonk verification key for a circuit with
     /// `num_inputs` public inputs and domain size `domain_size`.
     pub fn dummy(num_inputs: usize, domain_size: usize) -> Self {
-        let num_wire_types = GATE_WIDTH + 1;
+        let num_wire_types = GATE_WIDTH + 2;
         Self {
             domain_size,
             num_inputs,
             sigma_comms: vec![Commitment::default(); num_wire_types],
             selector_comms: vec![Commitment::default(); N_TURBO_PLONK_SELECTORS],
             k: compute_coset_representatives(num_wire_types, Some(domain_size)),
+            mu: None,
             open_key: OpenKey::default(),
             is_merged: false,
             plookup_vk: None,
@@ -821,6 +825,7 @@ impl<E: Pairing> VerifyingKey<E> {
             sigma_comms,
             selector_comms,
             k: self.k.clone(),
+            mu: None,
             open_key: self.open_key,
             plookup_vk: None,
             is_merged: true,
