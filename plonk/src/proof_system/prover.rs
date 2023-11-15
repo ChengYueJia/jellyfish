@@ -208,14 +208,17 @@ impl<E: Pairing> Prover<E> {
         online_oracles: &Oracles<E::ScalarField>,
         num_wire_types: usize,
     ) -> ProofEvaluations<E::ScalarField> {
+        // including evaluations of error term polynomial on opening
         let wires_evals: Vec<E::ScalarField> =
             parallelizable_slice_iter(&online_oracles.wire_polys)
                 .map(|poly| poly.evaluate(&challenges.zeta))
                 .collect();
+        // evaluations of sigma polynomials on opening excluding the last sigma polynomial
         let wire_sigma_evals: Vec<E::ScalarField> = parallelizable_slice_iter(&pk.sigmas)
-            .take(num_wire_types - 1)
+            .take(num_wire_types - 2)
             .map(|poly| poly.evaluate(&challenges.zeta))
             .collect();
+        // evaluations of grand-product polynomial on NEXT opening
         let perm_next_eval = online_oracles
             .prod_perm_poly
             .evaluate(&(challenges.zeta * self.domain.group_gen));
@@ -304,7 +307,11 @@ impl<E: Pairing> Prover<E> {
         poly_evals: &ProofEvaluations<E::ScalarField>,
         plookup_evals: Option<&PlookupEvaluations<E::ScalarField>>,
     ) -> Result<DensePolynomial<E::ScalarField>, PlonkError> {
-        let r_circ = Self::compute_lin_poly_circuit_contribution(pk, &poly_evals.wires_evals);
+        let r_circ = Self::compute_lin_poly_circuit_contribution(
+            pk,
+            &poly_evals.wires_evals,
+            &online_oracles.mu,
+        );
         let r_perm = Self::compute_lin_poly_copy_constraint_contribution(
             pk,
             challenges,
@@ -373,6 +380,7 @@ impl<E: Pairing> Prover<E> {
         // List the polynomials to be opened at point `zeta`.
         let mut polys_ref = vec![lin_poly];
         for (pk, oracles) in pks.iter().zip(online_oracles.iter()) {
+            // all wire polynomials including the error one
             for poly in oracles.wire_polys.iter() {
                 polys_ref.push(poly);
             }
@@ -963,6 +971,7 @@ impl<E: Pairing> Prover<E> {
     fn compute_lin_poly_circuit_contribution(
         pk: &ProvingKey<E>,
         w_evals: &[E::ScalarField],
+        mu: &E::ScalarField,
     ) -> DensePolynomial<E::ScalarField> {
         // The selectors order: q_lc, q_mul, q_hash, q_o, q_c, q_ecc
         // TODO: (binyi) get the order from a function.
@@ -970,17 +979,22 @@ impl<E: Pairing> Prover<E> {
         let q_mul = &pk.selectors[GATE_WIDTH..GATE_WIDTH + 2];
         let q_hash = &pk.selectors[GATE_WIDTH + 2..2 * GATE_WIDTH + 2];
         let q_o = &pk.selectors[2 * GATE_WIDTH + 2];
-        let q_c = &pk.selectors[2 * GATE_WIDTH + 3];
-        let q_ecc = &pk.selectors[2 * GATE_WIDTH + 4];
+        let q_e = &pk.selectors[2 * GATE_WIDTH + 3];
+        let q_c = &pk.selectors[2 * GATE_WIDTH + 4];
+        let q_ecc = &pk.selectors[2 * GATE_WIDTH + 5];
+
+        let mu_pow_5 = mu.pow([5]);
+        let mu_pow_4 = mu.pow([4]);
+        let mu_pow_3 = mu.pow([3]);
 
         // TODO(binyi): add polynomials in parallel.
         // Note we don't need to compute the constant term of the polynomial.
-        Self::mul_poly(&q_lc[0], &w_evals[0])
-            + Self::mul_poly(&q_lc[1], &w_evals[1])
-            + Self::mul_poly(&q_lc[2], &w_evals[2])
-            + Self::mul_poly(&q_lc[3], &w_evals[3])
-            + Self::mul_poly(&q_mul[0], &(w_evals[0] * w_evals[1]))
-            + Self::mul_poly(&q_mul[1], &(w_evals[2] * w_evals[3]))
+        Self::mul_poly(&q_lc[0], &(w_evals[0] * mu_pow_4))
+            + Self::mul_poly(&q_lc[1], &(w_evals[1] * mu_pow_4))
+            + Self::mul_poly(&q_lc[2], &(w_evals[2] * mu_pow_4))
+            + Self::mul_poly(&q_lc[3], &(w_evals[3] * mu_pow_4))
+            + Self::mul_poly(&q_mul[0], &(w_evals[0] * w_evals[1] * mu_pow_3))
+            + Self::mul_poly(&q_mul[1], &(w_evals[2] * w_evals[3] * mu_pow_3))
             + Self::mul_poly(&q_hash[0], &w_evals[0].pow([5]))
             + Self::mul_poly(&q_hash[1], &w_evals[1].pow([5]))
             + Self::mul_poly(&q_hash[2], &w_evals[2].pow([5]))
@@ -989,7 +1003,8 @@ impl<E: Pairing> Prover<E> {
                 q_ecc,
                 &(w_evals[0] * w_evals[1] * w_evals[2] * w_evals[3] * w_evals[4]),
             )
-            + Self::mul_poly(q_o, &(-w_evals[4]))
+            + Self::mul_poly(q_o, &(-w_evals[4] * mu_pow_5))
+            + Self::mul_poly(q_e, &(-w_evals[5]))
             + q_c.clone()
     }
 
@@ -1006,22 +1021,26 @@ impl<E: Pairing> Prover<E> {
         let lagrange_1_eval = dividend / divisor;
 
         // Compute the coefficient of z(X)
-        let coeff = poly_evals.wires_evals.iter().enumerate().fold(
-            challenges.alpha,
-            |acc, (j, &wire_eval)| {
-                acc * (wire_eval
-                    + challenges.beta * pk.vk.k[j] * challenges.zeta
-                    + challenges.gamma)
-            },
-        ) + challenges.alpha.square() * lagrange_1_eval;
-        let mut r_perm = Self::mul_poly(prod_perm_poly, &coeff);
-
-        // Compute the coefficient of the last sigma wire permutation polynomial
+        // need to exclude the error wire
         let num_wire_types = poly_evals.wires_evals.len();
-        let coeff = -poly_evals
+        let coeff = poly_evals
             .wires_evals
             .iter()
             .take(num_wire_types - 1)
+            .enumerate()
+            .fold(challenges.alpha, |acc, (j, &wire_eval)| {
+                acc * (wire_eval
+                    + challenges.beta * pk.vk.k[j] * challenges.zeta
+                    + challenges.gamma)
+            })
+            + challenges.alpha.square() * lagrange_1_eval;
+        let mut r_perm = Self::mul_poly(prod_perm_poly, &coeff);
+
+        // Compute the coefficient of the last sigma wire permutation polynomial
+        let coeff = -poly_evals
+            .wires_evals
+            .iter()
+            .take(num_wire_types - 2)
             .zip(poly_evals.wire_sigma_evals.iter())
             .fold(
                 challenges.alpha * challenges.beta * poly_evals.perm_next_eval,
